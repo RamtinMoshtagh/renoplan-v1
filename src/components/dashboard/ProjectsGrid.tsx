@@ -67,21 +67,6 @@ export default function ProjectsGrid({ projects }: { projects: ProjectRow[] }) {
             className="w-full sm:w-72"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-muted-foreground">Sort by</label>
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as any)}
-            className={cn(
-              'h-9 rounded-md border bg-background px-2 text-sm',
-              'focus:outline-none focus:ring-2 focus:ring-ring'
-            )}
-          >
-            <option value="recent">Recent</option>
-            <option value="name">Name</option>
-            <option value="budget">Budget</option>
-          </select>
-        </div>
       </div>
 
       {filtered.length === 0 ? (

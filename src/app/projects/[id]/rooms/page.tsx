@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServer } from '@/lib/supabase/server';
 
@@ -39,7 +39,7 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     else progress[roomId].not_started += 1;
   }
 
-  // ===== Server actions (only the ones we actually use here) =====
+  // ===== Server actions =====
   async function addRoom(formData: FormData) {
     'use server';
     const supa = await createSupabaseServer();
@@ -53,7 +53,10 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
 
     const sort = (maxSort?.sort ?? -1) + 1;
     await supa.from('rooms').insert({ project_id, name, sort });
+
+    // Refresh cache + trigger a client transition so the new card appears
     revalidatePath(`/projects/${project_id}/rooms`);
+    redirect(`/projects/${project_id}/rooms`);
   }
 
   async function reorderRooms(project_id: string, orderedIds: string[]) {
@@ -71,6 +74,9 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     }
     revalidatePath(`/projects/${project_id}/rooms`);
   }
+
+  // Force RoomListDnD to remount when the list changes (helps if it keeps local state)
+  const roomsKey = (rooms ?? []).map(r => r.id).join('|');
 
   // ===== UI =====
   return (
@@ -103,12 +109,13 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
         />
       ) : (
         <RoomListDnD
+          key={roomsKey}
           projectId={project.id}
           initialRooms={(rooms ?? []) as RoomRow[]}
-          reorderAction={reorderRooms}        // only function prop we pass
-          showMoveButtons={false}              // hide arrow buttons
-          showEditControls={false}             // hide rename/delete section
-          progress={progress}                  // progress data for bars
+          reorderAction={reorderRooms}
+          showMoveButtons={false}
+          showEditControls={false}
+          progress={progress}
         />
       )}
     </div>

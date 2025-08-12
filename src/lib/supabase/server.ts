@@ -6,7 +6,7 @@ type Opts = { allowCookieWrite?: boolean }
 
 export async function createSupabaseServer(opts: Opts = {}) {
   const cookieStore = await cookies()
-  const write = opts.allowCookieWrite !== false // default true
+  const canWrite = !!opts.allowCookieWrite // default false
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,11 +15,11 @@ export async function createSupabaseServer(opts: Opts = {}) {
       cookies: {
         get: async (name: string) => cookieStore.get(name)?.value,
         set: async (name: string, value: string, options?: any) => {
-          if (!write) return
+          if (!canWrite) return
           cookieStore.set({ name, value, ...options })
         },
         remove: async (name: string, options?: any) => {
-          if (!write) return
+          if (!canWrite) return
           cookieStore.set({ name, value: '', ...options, maxAge: 0 })
         },
       },

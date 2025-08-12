@@ -13,6 +13,7 @@ import {
   SheetClose,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 type ProjectHeaderProps = {
   projectId: string;
@@ -32,13 +33,15 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
   ];
 
   const currentProject = projects.find((p) => p.id === projectId);
+  const isActive = (href: string) =>
+    pathname === href || pathname.startsWith(href + '/');
 
   return (
     <header className="border-b bg-background sticky top-0 z-40">
       <div className="container h-14 flex items-center gap-3">
         {/* Left: brand / current project */}
         <div className="flex items-center gap-3 min-w-0">
-          <Link href="/projects" className="font-semibold shrink-0">
+          <Link href="/dashboard" className="font-semibold shrink-0">
             RenoPlan
           </Link>
           <div className="text-sm text-muted-foreground truncate">
@@ -46,30 +49,40 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
           </div>
         </div>
 
-        {/* Desktop nav */}
+        {/* Desktop nav: Dashboard + tabs */}
         <nav className="ml-auto hidden md:flex items-center gap-2">
-          {tabs.map((t) => {
-            const active = pathname === t.href || pathname.startsWith(t.href + '/');
-            return (
-              <Link
-                key={t.href}
-                href={t.href}
-                className={cn(
-                  'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
-                  active ? 'font-semibold bg-muted' : 'text-muted-foreground'
-                )}
-              >
-                {t.label}
-              </Link>
-            );
-          })}
-          {/* Desktop Sign out */}
-          <Button asChild variant="ghost" size="sm" className="ml-2">
-            <Link href="/logout?next=/marketing">Sign out</Link>
-          </Button>
+          <Link
+            href="/dashboard"
+            className={cn(
+              'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
+              pathname === '/dashboard' ? 'font-semibold bg-muted' : 'text-muted-foreground'
+            )}
+          >
+            Dashboard
+          </Link>
+
+          {tabs.map((t) => (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={cn(
+                'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
+                isActive(t.href) ? 'font-semibold bg-muted' : 'text-muted-foreground'
+              )}
+            >
+              {t.label}
+            </Link>
+          ))}
+
+          <div className="flex items-center gap-2 ml-2">
+            <ThemeToggle />
+            <Button asChild variant="outline" size="sm">
+              <Link href="/logout?next=/marketing">Sign out</Link>
+            </Button>
+          </div>
         </nav>
 
-        {/* Mobile: sheet menu */}
+        {/* Mobile: sheet menu only (toggle inside the sheet) */}
         <div className="ml-auto md:hidden">
           <Sheet>
             <SheetTrigger asChild>
@@ -108,26 +121,35 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
                 </div>
               )}
 
-              {/* Tabs */}
+              {/* Navigate */}
               <div className="mt-6">
                 <div className="text-xs text-muted-foreground mb-2">Navigate</div>
                 <div className="grid gap-1">
-                  {tabs.map((t) => {
-                    const active = pathname === t.href || pathname.startsWith(t.href + '/');
-                    return (
-                      <SheetClose asChild key={t.href}>
-                        <Link
-                          href={t.href}
-                          className={cn(
-                            'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
-                            active ? 'font-semibold bg-muted' : 'text-muted-foreground'
-                          )}
-                        >
-                          {t.label}
-                        </Link>
-                      </SheetClose>
-                    );
-                  })}
+                  <SheetClose asChild>
+                    <Link
+                      href="/dashboard"
+                      className={cn(
+                        'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
+                        pathname === '/dashboard' ? 'font-semibold bg-muted' : 'text-muted-foreground'
+                      )}
+                    >
+                      Dashboard
+                    </Link>
+                  </SheetClose>
+
+                  {tabs.map((t) => (
+                    <SheetClose asChild key={t.href}>
+                      <Link
+                        href={t.href}
+                        className={cn(
+                          'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
+                          isActive(t.href) ? 'font-semibold bg-muted' : 'text-muted-foreground'
+                        )}
+                      >
+                        {t.label}
+                      </Link>
+                    </SheetClose>
+                  ))}
                 </div>
               </div>
 
@@ -143,6 +165,14 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
                       Sign out
                     </Link>
                   </SheetClose>
+                </div>
+              </div>
+
+              {/* Appearance */}
+              <div className="mt-6 space-y-2">
+                <div className="text-xs text-muted-foreground">Appearance</div>
+                <div className="pt-1">
+                  <ThemeToggle />
                 </div>
               </div>
             </SheetContent>

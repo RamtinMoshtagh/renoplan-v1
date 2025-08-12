@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -74,16 +74,22 @@ export default async function RoomDetailPage({
   }
 
   async function deleteRoom(formData: FormData) {
-    'use server';
-    const supa = await createSupabaseServer();
-    const project_id = String(formData.get('project_id'));
-    const room_id = String(formData.get('room_id'));
-    await supa.from('rooms').delete().eq('id', room_id);
+  'use server'
+  const supa = await createSupabaseServer({ allowCookieWrite: true })
+  const project_id = String(formData.get('project_id'))
+  const room_id = String(formData.get('room_id'))
+
+  if (!project_id || !room_id) return
+
+  await supa.from('rooms').delete().eq('id', room_id).eq('project_id', project_id)
+
+  // refresh rooms list and jump there with a toast flag
     revalidatePath(`/projects/${project_id}/rooms/${room_id}`);
     revalidatePath(`/projects/${project_id}/rooms`);
     revalidatePath(`/projects/${project_id}`);
     revalidatePath(`/projects/${project_id}/budget`); 
     revalidatePath(`/projects/${project_id}/report`);
+    redirect(`/projects/${project_id}/rooms?toast=room_deleted`)
 
   }
 
@@ -264,7 +270,7 @@ export default async function RoomDetailPage({
         </Card>
 
         {/* Keep placeholders for future room-level budget/docs */}
-        <Card>
+        {/* <Card>
           <CardHeader className="border-0 pb-0">
             <CardTitle className="text-base">Budget (room)</CardTitle>
             <CardDescription>Track estimates and actuals per room.</CardDescription>
@@ -298,7 +304,7 @@ export default async function RoomDetailPage({
               <Button size="sm" variant="secondary">Open project docs</Button>
             </Link>
           </CardFooter>
-        </Card>
+        </Card> */}
       </ResponsiveGrid>
     </div>
   );

@@ -45,7 +45,7 @@ export default async function Dashboard() {
   // ===== Server action: create a project (and redirect) =====
   async function createProject(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true })
     const { data: { user: u } } = await supa.auth.getUser();
     if (!u) {
       redirect('/login?next=/dashboard');
@@ -85,44 +85,7 @@ export default async function Dashboard() {
       <PageHeader
         title="My Projects"
         description="Create a new project or jump back into an existing one."
-        actions={
-          <Link href="/projects">
-            <Button variant="secondary">Open Projects</Button>
-          </Link>
-        }
       />
-
-      {/* Stats */}
-      <ResponsiveGrid min={220} gap="1rem">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Projects</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="text-2xl font-semibold">{totalProjects}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Total budget</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="text-2xl font-semibold">kr {nok(totalBudget)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Avg. progress</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="text-2xl font-semibold">{avgProgress}%</div>
-            <div className="mt-2">
-              <ProjectProgress percent={avgProgress} />
-            </div>
-          </CardContent>
-        </Card>
-      </ResponsiveGrid>
-
       {/* Quick create */}
       <Card>
         <CardHeader className="border-0 pb-0">
