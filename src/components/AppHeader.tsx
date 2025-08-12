@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,7 +10,12 @@ import {
   SheetDescription,
   SheetClose,
 } from '@/components/ui/sheet';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Menu } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -23,19 +27,18 @@ export default async function AppHeader() {
 
   if (!user) return null;
 
-  async function signOut() {
-    'use server';
-    const supa = await createSupabaseServer({ allowCookieWrite: true });
-    await supa.auth.signOut();
-    redirect('/login');
-  }
-
   const Nav = () => (
     <nav className="flex items-center gap-2">
-      <Link href="/dashboard" className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition">
+      <Link
+        href="/dashboard"
+        className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition"
+      >
         Dashboard
       </Link>
-      <Link href="/projects" className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition">
+      <Link
+        href="/projects"
+        className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition"
+      >
         Projects
       </Link>
     </nav>
@@ -64,18 +67,23 @@ export default async function AppHeader() {
               <Button variant="outline" size="sm">{user.email}</Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <form action={signOut}>
-                <DropdownMenuItem asChild>
-                  <button type="submit" className="w-full text-left">Sign out</button>
-                </DropdownMenuItem>
-              </form>
+              <DropdownMenuItem asChild>
+                <Link href="/logout?next=/marketing" className="w-full">
+                  Sign out
+                </Link>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
           {/* Mobile menu */}
           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="outline" size="icon" className="md:hidden" aria-label="Open navigation">
+              <Button
+                variant="outline"
+                size="icon"
+                className="md:hidden"
+                aria-label="Open navigation"
+              >
                 <Menu className="h-4 w-4" />
               </Button>
             </SheetTrigger>
@@ -102,6 +110,20 @@ export default async function AppHeader() {
                       className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition"
                     >
                       Projects
+                    </Link>
+                  </SheetClose>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-2">
+                <div className="text-xs text-muted-foreground">Account</div>
+                <div className="grid">
+                  <SheetClose asChild>
+                    <Link
+                      href="/logout?next=/marketing"
+                      className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition"
+                    >
+                      Sign out
                     </Link>
                   </SheetClose>
                 </div>

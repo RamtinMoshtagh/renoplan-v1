@@ -14,11 +14,12 @@ import { ResponsiveGrid } from '@/components/layout/ResponsiveGrid';
 import { EmptyState } from '@/components/ui/empty-state';
 
 type RoomRow = { id: string; name: string | null; sort: number };
+type TaskRow = { id: string; room_id: string | null; status: 'not_started'|'in_progress'|'done' };
 
 export default async function ProjectOverviewPage(
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params; // ✅ Await Promise-based params
+  const { id } = await params;
   const supabase = await createSupabaseServer();
   await supabase.auth.getUser();
 
@@ -29,7 +30,7 @@ export default async function ProjectOverviewPage(
     .single();
   if (!project) notFound();
 
-  const [{ data: rooms }, { data: budget }] = await Promise.all([
+  const [{ data: rooms }, { data: budget }, { data: projectTasks }] = await Promise.all([
     supabase
       .from('rooms')
       .select('id,name,sort')
@@ -39,15 +40,36 @@ export default async function ProjectOverviewPage(
       .from('budget_items')
       .select('amount_estimated, amount_actual')
       .eq('project_id', project.id),
+    // Pull minimal fields; we'll compute per-room progress below
+    supabase
+      .from('tasks')
+      .select('id,room_id,status')
+      .eq('project_id', project.id),
   ]);
 
+  // ---- Budget numbers ----
   const est = (budget ?? []).reduce((s: number, b: any) => s + Number(b.amount_estimated ?? 0), 0);
   const act = (budget ?? []).reduce((s: number, b: any) => s + Number(b.amount_actual ?? 0), 0);
   const total = Number(project.total_budget ?? 0);
   const pctEst = total > 0 ? Math.min(100, Math.round((est / total) * 100)) : 0;
   const pctAct = total > 0 ? Math.min(100, Math.round((act / total) * 100)) : 0;
 
-  // ===== Server actions =====
+  // ---- Per-room task progress ----
+  const progressByRoom = new Map<string, { total: number; done: number; in_progress: number; not_started: number }>();
+  for (const t of (projectTasks ?? []) as TaskRow[]) {
+    const roomId = t.room_id;
+    if (!roomId) continue;
+    if (!progressByRoom.has(roomId)) {
+      progressByRoom.set(roomId, { total: 0, done: 0, in_progress: 0, not_started: 0 });
+    }
+    const agg = progressByRoom.get(roomId)!;
+    agg.total += 1;
+    if (t.status === 'done') agg.done += 1;
+    else if (t.status === 'in_progress') agg.in_progress += 1;
+    else agg.not_started += 1;
+  }
+
+  // ===== Server actions (Overview only needs Add) =====
   async function addRoom(formData: FormData) {
     'use server';
     const supa = await createSupabaseServer();
@@ -65,67 +87,6 @@ export default async function ProjectOverviewPage(
 
     const sort = (maxSort?.sort ?? -1) + 1;
     await supa.from('rooms').insert({ project_id, name, sort });
-    revalidatePath(`/projects/${project_id}`);
-  }
-
-  async function renameRoom(formData: FormData) {
-    'use server';
-    const supa = await createSupabaseServer();
-    const project_id = String(formData.get('project_id'));
-    const room_id = String(formData.get('room_id'));
-    const name = String(formData.get('name') || '').trim();
-    if (!name) return;
-    await supa.from('rooms').update({ name }).eq('id', room_id);
-    revalidatePath(`/projects/${project_id}`);
-  }
-
-  async function deleteRoom(formData: FormData) {
-    'use server';
-    const supa = await createSupabaseServer();
-    const project_id = String(formData.get('project_id'));
-    const room_id = String(formData.get('room_id'));
-    await supa.from('rooms').delete().eq('id', room_id);
-    revalidatePath(`/projects/${project_id}`);
-  }
-
-  async function moveRoom(formData: FormData) {
-    'use server';
-    const supa = await createSupabaseServer();
-    const project_id = String(formData.get('project_id'));
-    const room_id = String(formData.get('room_id'));
-    const dir = String(formData.get('dir')) as 'up' | 'down';
-
-    const { data: current } = await supa
-      .from('rooms')
-      .select('id,sort')
-      .eq('id', room_id)
-      .single();
-    if (!current) return;
-
-    const neighborUp = await supa
-      .from('rooms')
-      .select('id,sort')
-      .eq('project_id', project_id)
-      .lt('sort', current.sort)
-      .order('sort', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const neighborDown = await supa
-      .from('rooms')
-      .select('id,sort')
-      .eq('project_id', project_id)
-      .gt('sort', current.sort)
-      .order('sort', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    const target = dir === 'up' ? neighborUp.data : neighborDown.data;
-    if (!target) return;
-
-    await supa.from('rooms').update({ sort: target.sort }).eq('id', current.id);
-    await supa.from('rooms').update({ sort: current.sort }).eq('id', target.id);
-
     revalidatePath(`/projects/${project_id}`);
   }
 
@@ -207,10 +168,11 @@ export default async function ProjectOverviewPage(
         <Card className="md:col-span-2 animate-in fade-in-50 slide-in-from-bottom-1">
           <CardHeader className="border-0 pb-0">
             <CardTitle className="text-base">Rooms</CardTitle>
-            <CardDescription>Add, rename, reorder, or delete rooms.</CardDescription>
+            <CardDescription>Add, then click into a room to manage tasks and details.</CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-3 pt-3">
+            {/* Add room */}
             <form action={addRoom} className="flex flex-col sm:flex-row gap-2">
               <input type="hidden" name="project_id" value={project.id} />
               <Input name="name" placeholder="New room name" className="flex-1" required />
@@ -226,50 +188,47 @@ export default async function ProjectOverviewPage(
               />
             ) : (
               <ul className="auto-grid" style={{ ['--min-card' as any]: '260px' }}>
-                {((rooms ?? []) as RoomRow[]).map((r, idx) => (
-                  <li
-                    key={r.id}
-                    className="rounded-md border p-3 flex flex-col gap-2 card-elevated break-inside-avoid"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium flex-1 truncate">{r.name ?? 'Untitled room'}</span>
+                {((rooms ?? []) as RoomRow[]).map((r) => {
+                  const agg = progressByRoom.get(r.id) ?? { total: 0, done: 0, in_progress: 0, not_started: 0 };
+                  const pct = agg.total > 0 ? Math.round((agg.done / agg.total) * 100) : 0;
 
-                      <div className="flex items-center gap-1">
-                        <form action={moveRoom}>
-                          <input type="hidden" name="project_id" value={project.id} />
-                          <input type="hidden" name="room_id" value={r.id} />
-                          <input type="hidden" name="dir" value="up" />
-                          <Button type="submit" variant="outline" size="sm" title="Move up" disabled={idx === 0}>↑</Button>
-                        </form>
-                        <form action={moveRoom}>
-                          <input type="hidden" name="project_id" value={project.id} />
-                          <input type="hidden" name="room_id" value={r.id} />
-                          <input type="hidden" name="dir" value="down" />
-                          <Button type="submit" variant="outline" size="sm" title="Move down" disabled={idx === (rooms?.length ?? 1) - 1}>↓</Button>
-                        </form>
-                      </div>
-                    </div>
+                  return (
+                    <li key={r.id} className="rounded-md border p-3 card-elevated break-inside-avoid">
+                      {/* Whole card is clickable via inner Link */}
+                      <Link
+                        href={`/projects/${id}/rooms/${r.id}`}
+                        className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium flex-1 truncate">
+                            {r.name ?? 'Untitled room'}
+                          </span>
+                        </div>
 
-                    <details className="group">
-                      <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground underline">
-                        Edit
-                      </summary>
-                      <div className="mt-2 flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                        <form action={renameRoom} className="flex gap-2 w-full sm:w-auto">
-                          <input type="hidden" name="project_id" value={project.id} />
-                          <input type="hidden" name="room_id" value={r.id} />
-                          <Input name="name" defaultValue={r.name ?? ''} className="h-9 w-full sm:w-56" />
-                          <Button variant="outline" size="sm">Save</Button>
-                        </form>
-                        <form action={deleteRoom}>
-                          <input type="hidden" name="project_id" value={project.id} />
-                          <input type="hidden" name="room_id" value={r.id} />
-                          <Button variant="outline" size="sm">Delete</Button>
-                        </form>
-                      </div>
-                    </details>
-                  </li>
-                ))}
+                        {/* Progress bar */}
+                        <div className="mt-3 space-y-1.5">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{agg.done}/{agg.total} done</span>
+                            <span>{pct}%</span>
+                          </div>
+                          <div
+                            className="h-2 w-full overflow-hidden rounded bg-muted"
+                            aria-label="Room completion"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={pct}
+                            role="progressbar"
+                          >
+                            <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {agg.in_progress} in progress • {agg.not_started} not started
+                          </div>
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardContent>

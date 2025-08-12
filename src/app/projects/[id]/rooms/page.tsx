@@ -12,27 +12,34 @@ import { Input } from '@/components/ui/input';
 import { RoomListDnD } from './RoomListDnD';
 
 type RoomRow = { id: string; name: string; sort: number };
+type TaskRow = { id: string; room_id: string | null; status: 'not_started'|'in_progress'|'done' };
 
 export default async function RoomsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-
   const supabase = await createSupabaseServer();
 
   const { data: project } = await supabase
-    .from('projects')
-    .select('id,name')
-    .eq('id', id)
-    .single();
-
+    .from('projects').select('id,name').eq('id', id).single();
   if (!project) notFound();
 
-  const { data: rooms } = await supabase
-    .from('rooms')
-    .select('id,name,sort')
-    .eq('project_id', project.id)
-    .order('sort', { ascending: true });
+  const [{ data: rooms }, { data: tasks }] = await Promise.all([
+    supabase.from('rooms').select('id,name,sort').eq('project_id', project.id).order('sort', { ascending: true }),
+    supabase.from('tasks').select('id,room_id,status').eq('project_id', project.id),
+  ]);
 
-  // ===== Server actions (unchanged) =====
+  // ---- Per-room task progress (serializable) ----
+  const progress: Record<string, { total: number; done: number; in_progress: number; not_started: number }> = {};
+  for (const t of (tasks ?? []) as TaskRow[]) {
+    const roomId = t.room_id;
+    if (!roomId) continue;
+    progress[roomId] ??= { total: 0, done: 0, in_progress: 0, not_started: 0 };
+    progress[roomId].total += 1;
+    if (t.status === 'done') progress[roomId].done += 1;
+    else if (t.status === 'in_progress') progress[roomId].in_progress += 1;
+    else progress[roomId].not_started += 1;
+  }
+
+  // ===== Server actions (only the ones we actually use here) =====
   async function addRoom(formData: FormData) {
     'use server';
     const supa = await createSupabaseServer();
@@ -41,71 +48,11 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     if (!name) return;
 
     const { data: maxSort } = await supa
-      .from('rooms')
-      .select('sort')
-      .eq('project_id', project_id)
-      .order('sort', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .from('rooms').select('sort').eq('project_id', project_id)
+      .order('sort', { ascending: false }).limit(1).maybeSingle();
 
     const sort = (maxSort?.sort ?? -1) + 1;
     await supa.from('rooms').insert({ project_id, name, sort });
-    revalidatePath(`/projects/${project_id}/rooms`);
-  }
-
-  async function renameRoom(formData: FormData) {
-    'use server';
-    const supa = await createSupabaseServer();
-    const project_id = String(formData.get('project_id'));
-    const room_id = String(formData.get('room_id'));
-    const name = String(formData.get('name') || '').trim();
-    if (!name) return;
-    await supa.from('rooms').update({ name }).eq('id', room_id);
-    revalidatePath(`/projects/${project_id}/rooms`);
-  }
-
-  async function deleteRoom(formData: FormData) {
-    'use server';
-    const supa = await createSupabaseServer();
-    const project_id = String(formData.get('project_id'));
-    const room_id = String(formData.get('room_id'));
-    await supa.from('rooms').delete().eq('id', room_id);
-    revalidatePath(`/projects/${project_id}/rooms`);
-  }
-
-  async function moveRoom(formData: FormData) {
-    'use server';
-    const supa = await createSupabaseServer();
-    const project_id = String(formData.get('project_id'));
-    const room_id = String(formData.get('room_id'));
-    const dir = String(formData.get('dir')) as 'up' | 'down';
-
-    const { data: current } = await supa.from('rooms').select('id,sort').eq('id', room_id).single();
-    if (!current) return;
-
-    const neighborUp = await supa
-      .from('rooms')
-      .select('id,sort')
-      .eq('project_id', project_id)
-      .lt('sort', current.sort)
-      .order('sort', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const neighborDown = await supa
-      .from('rooms')
-      .select('id,sort')
-      .eq('project_id', project_id)
-      .gt('sort', current.sort)
-      .order('sort', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    const target = dir === 'up' ? neighborUp.data : neighborDown.data;
-    if (!target) return;
-
-    await supa.from('rooms').update({ sort: target.sort }).eq('id', current.id);
-    await supa.from('rooms').update({ sort: current.sort }).eq('id', target.id);
     revalidatePath(`/projects/${project_id}/rooms`);
   }
 
@@ -114,11 +61,7 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     const supa = await createSupabaseServer();
     if (!orderedIds?.length) return;
 
-    const { data: projectRooms } = await supa
-      .from('rooms')
-      .select('id')
-      .eq('project_id', project_id);
-
+    const { data: projectRooms } = await supa.from('rooms').select('id').eq('project_id', project_id);
     const allowed = new Set((projectRooms ?? []).map((r) => r.id));
     const updates = orderedIds.map((roomId, idx) => ({ roomId, idx })).filter(({ roomId }) => allowed.has(roomId));
 
@@ -126,7 +69,6 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
       const { error } = await supa.from('rooms').update({ sort: idx }).eq('id', roomId);
       if (error) throw new Error(error.message);
     }
-
     revalidatePath(`/projects/${project_id}/rooms`);
   }
 
@@ -135,7 +77,7 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     <div className="space-y-4 md:space-y-6">
       <PageHeader
         title="Rooms"
-        description="Drag to reorder. You can still use the move buttons or rename/delete."
+        description="Drag to reorder. Click a room to view details. Progress bars show completion."
         actions={<Link href={`/projects/${id}`}><Button variant="secondary">Back to Overview</Button></Link>}
       />
 
@@ -157,17 +99,16 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
         <EmptyState
           className="mt-2"
           title="No rooms yet"
-          description="Start by adding your first room. You can reorder, rename and delete anytime."
+          description="Start by adding your first room. You can reorder anytime."
         />
       ) : (
         <RoomListDnD
           projectId={project.id}
           initialRooms={(rooms ?? []) as RoomRow[]}
-          onReorder={reorderRooms}
-          moveUpAction={moveRoom}
-          moveDownAction={moveRoom}
-          renameAction={renameRoom}
-          deleteAction={deleteRoom}
+          reorderAction={reorderRooms}        // only function prop we pass
+          showMoveButtons={false}              // hide arrow buttons
+          showEditControls={false}             // hide rename/delete section
+          progress={progress}                  // progress data for bars
         />
       )}
     </div>

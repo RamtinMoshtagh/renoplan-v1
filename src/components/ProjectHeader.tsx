@@ -26,7 +26,6 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
     { href: `/projects/${projectId}`, label: 'Overview' },
     { href: `/projects/${projectId}/rooms`, label: 'Rooms' },
     { href: `/projects/${projectId}/budget`, label: 'Budget' },
-    { href: `/projects/${projectId}/tasks`, label: 'Tasks' },
     { href: `/projects/${projectId}/documents`, label: 'Documents' },
     { href: `/projects/${projectId}/report`, label: 'Report' },
     { href: `/projects/${projectId}/settings`, label: 'Settings' },
@@ -50,7 +49,7 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
         {/* Desktop nav */}
         <nav className="ml-auto hidden md:flex items-center gap-2">
           {tabs.map((t) => {
-            const active = pathname === t.href;
+            const active = pathname === t.href || pathname.startsWith(t.href + '/');
             return (
               <Link
                 key={t.href}
@@ -64,6 +63,10 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
               </Link>
             );
           })}
+          {/* Desktop Sign out */}
+          <Button asChild variant="ghost" size="sm" className="ml-2">
+            <Link href="/logout?next=/marketing">Sign out</Link>
+          </Button>
         </nav>
 
         {/* Mobile: sheet menu */}
@@ -75,7 +78,6 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
               </Button>
             </SheetTrigger>
 
-            {/* Either include a description... */}
             <SheetContent side="right">
               <SheetHeader>
                 <SheetTitle>Project menu</SheetTitle>
@@ -111,7 +113,7 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
                 <div className="text-xs text-muted-foreground mb-2">Navigate</div>
                 <div className="grid gap-1">
                   {tabs.map((t) => {
-                    const active = pathname === t.href;
+                    const active = pathname === t.href || pathname.startsWith(t.href + '/');
                     return (
                       <SheetClose asChild key={t.href}>
                         <Link
@@ -126,6 +128,21 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
                       </SheetClose>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Account / Sign out */}
+              <div className="mt-6">
+                <div className="text-xs text-muted-foreground mb-2">Account</div>
+                <div className="grid">
+                  <SheetClose asChild>
+                    <Link
+                      href="/logout?next=/marketing"
+                      className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition"
+                    >
+                      Sign out
+                    </Link>
+                  </SheetClose>
                 </div>
               </div>
             </SheetContent>

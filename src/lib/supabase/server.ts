@@ -1,29 +1,26 @@
+// src/lib/supabase/server.ts
 import { cookies } from 'next/headers'
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 
-/**
- * In Server Components, use default (read-only cookies).
- * In Server Actions / Route Handlers, call with { allowCookieWrite: true }.
- */
-export async function createSupabaseServer(opts: { allowCookieWrite?: boolean } = {}) {
-  const { allowCookieWrite = false } = opts
+type Opts = { allowCookieWrite?: boolean }
+
+export async function createSupabaseServer(opts: Opts = {}) {
   const cookieStore = await cookies()
+  const write = opts.allowCookieWrite !== false // default true
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
+        get: async (name: string) => cookieStore.get(name)?.value,
+        set: async (name: string, value: string, options?: any) => {
+          if (!write) return
+          cookieStore.set({ name, value, ...options })
         },
-        set(name: string, value: string, options: CookieOptions) {
-          if (!allowCookieWrite) return
-          try { cookieStore.set({ name, value, ...options }) } catch { /* ignore in RSC */ }
-        },
-        remove(name: string, options: CookieOptions) {
-          if (!allowCookieWrite) return
-          try { cookieStore.set({ name, value: '', ...options }) } catch { /* ignore in RSC */ }
+        remove: async (name: string, options?: any) => {
+          if (!write) return
+          cookieStore.set({ name, value: '', ...options, maxAge: 0 })
         },
       },
     }
