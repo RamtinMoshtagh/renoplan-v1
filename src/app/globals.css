@@ -1,0 +1,82 @@
+/* src/app/globals.css */
+:root { --app-header-h: 56px; }
+
+/* Tailwind core */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Color tokens */
+:root {
+  --background: 36 42% 96%;
+  --foreground: 30 12% 12%;
+  --card: 30 35% 92%;
+  --card-foreground: 30 12% 12%;
+  --muted: 30 20% 90%;
+  --muted-foreground: 30 8% 35%;
+  --primary: 28 28% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 28 20% 85%;
+  --secondary-foreground: 30 12% 12%;
+  --accent: 28 28% 60%;
+  --accent-foreground: 0 0% 100%;
+  --border: 28 28% 82%;
+  --input: 28 28% 82%;
+  --ring: 28 28% 60%;
+
+  /* layout tokens */
+  --radius: 10px;
+  --gap: 1rem;
+  --min-card: 260px;
+}
+
+.dark {
+  --background: 30 14% 10%;
+  --foreground: 36 20% 96%;
+  --card: 30 12% 14%;
+  --card-foreground: 36 20% 96%;
+  --muted: 30 8% 18%;
+  --muted-foreground: 36 8% 70%;
+  --primary: 28 28% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 30 10% 16%;
+  --secondary-foreground: 36 20% 96%;
+  --accent: 28 28% 60%;
+  --accent-foreground: 0 0% 100%;
+  --border: 30 8% 22%;
+  --input: 30 8% 22%;
+  --ring: 28 28% 60%;
+}
+
+html, body { height: 100%; }
+body { @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))] antialiased; }
+
+/* Auto-responsive grid for cards/lists */
+.auto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--min-card), 1fr));
+  gap: var(--gap);
+}
+
+/* Subtle hover elevation for cards (uses tailwind utilities for consistency) */
+.card-elevated { @apply shadow-soft transition-transform; }
+.card-elevated:hover { @apply shadow-lg -translate-y-px; }
+
+/* Better focus ring */
+:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
+
+/* Print base */
+@media print {
+  header, nav, .no-print, .print\:hidden { display: none !important; }
+  main, .print\:p-0 { padding: 0 !important; }
+  body { background: white !important; }
+  @page { margin: 12mm; }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* Optional: slimmer scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--tw-ring) transparent; }
