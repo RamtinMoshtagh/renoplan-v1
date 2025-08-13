@@ -1,14 +1,29 @@
-'use client';
-import * as React from 'react';
+// hooks/use-media-query.ts
+'use client'
+import * as React from 'react'
 
 export function useMediaQuery(query: string) {
-  const [matches, setMatches] = React.useState(false);
+  const [matches, setMatches] = React.useState(false)
+
   React.useEffect(() => {
-    const m = window.matchMedia(query);
-    const onChange = () => setMatches(m.matches);
-    onChange();
-    m.addEventListener('change', onChange);
-    return () => m.removeEventListener('change', onChange);
-  }, [query]);
-  return matches;
+    if (typeof window === 'undefined') return
+    const m = window.matchMedia(query)
+    const handler = () => setMatches(m.matches)
+
+    // run once
+    handler()
+
+    // Safari < 14 fallback
+    if (typeof m.addEventListener === 'function') {
+      m.addEventListener('change', handler)
+      return () => m.removeEventListener('change', handler)
+    } else {
+      // @ts-ignore legacy API
+      m.addListener(handler)
+      // @ts-ignore legacy API
+      return () => m.removeListener(handler)
+    }
+  }, [query])
+
+  return matches
 }

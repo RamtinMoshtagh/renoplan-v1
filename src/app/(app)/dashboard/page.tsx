@@ -1,20 +1,21 @@
+// app/(app)/dashboard/page.tsx
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServer } from '@/lib/supabase/server';
 
 import { PageHeader } from '@/components/layout/PageHeader';
-import { ResponsiveGrid } from '@/components/layout/ResponsiveGrid';
-import {
-  Card, CardContent, CardHeader, CardTitle, CardDescription,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { nok } from '@/lib/numbers';
-import { ProjectProgress } from '@/components/ProjectProgress'; // <- named import
 
+// ✅ Import client components normally (they already have "use client")
 import QuickCreateProject from '@/components/dashboard/QuickCreateProject';
 import ProjectsGrid from '@/components/dashboard/ProjectsGrid';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 type ProjectRow = {
   id: string;
@@ -25,13 +26,10 @@ type ProjectRow = {
   owner_id?: string | null;
 };
 
-export default async function Dashboard() {
-  const supabase = await createSupabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect('/login?next=/dashboard');
-  }
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServer()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login?next=/dashboard')
 
   const { data: projectsRaw } = await supabase
     .from('projects')
@@ -39,17 +37,14 @@ export default async function Dashboard() {
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false });
 
-  // Ensure we always have an array for typing & runtime
   const projects: ProjectRow[] = Array.isArray(projectsRaw) ? (projectsRaw as ProjectRow[]) : [];
 
   // ===== Server action: create a project (and redirect) =====
   async function createProject(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer({ allowCookieWrite: true })
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const { data: { user: u } } = await supa.auth.getUser();
-    if (!u) {
-      redirect('/login?next=/dashboard');
-    }
+    if (!u) redirect('/login?next=/dashboard');
 
     const rawName = String(formData.get('name') || '').trim();
     const name = rawName || 'Untitled project';
@@ -59,7 +54,7 @@ export default async function Dashboard() {
 
     const { data, error } = await supa
       .from('projects')
-      .insert({ name, total_budget, owner_id: u!.id })
+      .insert({ name, total_budget, owner_id: u.id })
       .select('id')
       .single();
 
@@ -71,21 +66,13 @@ export default async function Dashboard() {
     redirect(`/projects/${data.id}`);
   }
 
-  // Aggregates for stat cards
-  const totalProjects = projects.length;
-  const totalBudget = projects.reduce((sum, p) => sum + (p.total_budget ?? 0), 0);
-  const avgProgress = totalProjects
-    ? Math.round(
-        projects.reduce((sum, p) => sum + Number(p.progress ?? 0), 0) / totalProjects
-      )
-    : 0;
-
   return (
     <div className="space-y-6 md:space-y-8">
       <PageHeader
         title="My Projects"
         description="Create a new project or jump back into an existing one."
       />
+
       {/* Quick create */}
       <Card>
         <CardHeader className="border-0 pb-0">
@@ -104,7 +91,7 @@ export default async function Dashboard() {
           title="No projects yet"
           description="Create your first project above to start planning rooms, budget, tasks and documents."
           actions={
-            <Link href="/projects">
+            <Link href="/projects" prefetch={false}>
               <Button>Open Projects</Button>
             </Link>
           }

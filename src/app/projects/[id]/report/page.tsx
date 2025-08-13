@@ -1,6 +1,6 @@
 // src/app/projects/[id]/report/page.tsx
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { createSupabaseServer } from '@/lib/supabase/server';
 
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { PrintButton } from '@/components/PrintButton';
 import { nok } from '@/lib/numbers';
+import { formatDateTimeUTC } from '@/lib/dates';
 
 type RoomRow = { id: string; name: string | null; sort: number };
-type BudgetItem = { amount_estimated: number | null; amount_actual: number | null; room_id: string | null };
+type BudgetItem = { amount_estimated: number | null; amount_actual: number | null };
 type TaskRow = {
   room_id: string | null;
   status: 'not_started' | 'in_progress' | 'done';
@@ -19,19 +20,30 @@ type TaskRow = {
   actual_cost: number | null;
 };
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function ProjectReportPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params; // ✅ await Promise-based params
+  const { id } = await params;
 
-  const supabase = await createSupabaseServer();
+  // ✅ persist refreshed tokens in prod
+  const supabase = await createSupabaseServer({ allowCookieWrite: true });
 
+  // Auth
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect(`/login?next=/projects/${id}/report`);
+
+  // Ensure ownership
   const { data: project } = await supabase
     .from('projects')
     .select('*')
     .eq('id', id)
+    .eq('owner_id', user.id)
     .single();
   if (!project) notFound();
 
@@ -43,7 +55,7 @@ export default async function ProjectReportPage({
       .order('sort', { ascending: true }) as unknown as { data: RoomRow[] | null },
     supabase
       .from('budget_items')
-      .select('amount_estimated,amount_actual,room_id')
+      .select('amount_estimated,amount_actual')
       .eq('project_id', project.id) as unknown as { data: BudgetItem[] | null },
     supabase
       .from('tasks')
@@ -65,17 +77,21 @@ export default async function ProjectReportPage({
   const pctEst = totalBudget > 0 ? Math.min(100, Math.round((est / totalBudget) * 100)) : 0;
   const pctAct = totalBudget > 0 ? Math.min(100, Math.round((act / totalBudget) * 100)) : 0;
 
-  // ----- Budget by room (items + tasks) -----
+  // ----- Budget by room (tasks only) + a general bucket for items -----
   const byRoomBudget = new Map<string, { est: number; act: number }>();
-  function addBudget(roomId: string | null, estVal: number, actVal: number) {
-    const key = roomId ?? 'unassigned';
-    const curr = byRoomBudget.get(key) ?? { est: 0, act: 0 };
+  const general = { est: estItems, act: actItems }; // all budget_items live here (no room in schema)
+
+  function addTo(map: Map<string, { est: number; act: number }>, key: string, estVal: number, actVal: number) {
+    const curr = map.get(key) ?? { est: 0, act: 0 };
     curr.est += estVal;
     curr.act += actVal;
-    byRoomBudget.set(key, curr);
+    map.set(key, curr);
   }
-  (items ?? []).forEach((b) => addBudget(b.room_id, Number(b.amount_estimated ?? 0), Number(b.amount_actual ?? 0)));
-  (tasks ?? []).forEach((t) => addBudget(t.room_id, Number(t.estimate_cost ?? 0), Number(t.actual_cost ?? 0)));
+
+  (tasks ?? []).forEach((t) => {
+    const key = t.room_id ?? 'unassigned';
+    addTo(byRoomBudget, key, Number(t.estimate_cost ?? 0), Number(t.actual_cost ?? 0));
+  });
 
   // ----- Task progress (overall + per-room) -----
   const progressByRoom = new Map<string, { total: number; done: number; in_progress: number; not_started: number }>();
@@ -105,10 +121,10 @@ export default async function ProjectReportPage({
     <div className="space-y-4 md:space-y-6 print:p-0">
       <PageHeader
         title={`Project report — ${project.name ?? project.id}`}
-        description={new Date().toLocaleString()}
+        description={formatDateTimeUTC(Date.now())}
         actions={
           <>
-            <Link href={`/projects/${id}`} className="no-print">
+            <Link href={`/projects/${id}`} prefetch={false} className="no-print">
               <Button variant="secondary">Back</Button>
             </Link>
             <PrintButton>Print</PrintButton>
@@ -118,54 +134,39 @@ export default async function ProjectReportPage({
 
       {/* Summary */}
       <ResponsiveGrid min={320} gap="1rem">
-  <Card style={{ breakInside: 'avoid' }}>
-    <CardHeader className="border-0 pb-0">
-      <CardTitle className="text-base">Budget summary</CardTitle>
-      <CardDescription>Items + tasks combined</CardDescription>
-    </CardHeader>
-    <CardContent className="pt-3 space-y-3">
-      <dl className="grid grid-cols-2 gap-3">
-        <div className="rounded-md border p-3 md:min-w-0">
-          <dt className="text-xs text-muted-foreground">Project total</dt>
-          <dd className="text-lg md:text-xl font-semibold tabular-nums">
-            kr {nok(totalBudget)}
-          </dd>
-        </div>
-        <div className="rounded-md border p-3 md:min-w-0">
-          <dt className="text-xs text-muted-foreground">Remaining</dt>
-          <dd className="text-lg md:text-xl font-semibold tabular-nums">
-            kr {nok(Math.max(totalBudget - act, 0))}
-          </dd>
-        </div>
-      </dl>
+        <Card style={{ breakInside: 'avoid' }}>
+          <CardHeader className="border-0 pb-0">
+            <CardTitle className="text-base">Budget summary</CardTitle>
+            <CardDescription>Items + tasks combined</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-3 space-y-3">
+            <dl className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border p-3 md:min-w-0">
+                <dt className="text-xs text-muted-foreground">Project total</dt>
+                <dd className="text-lg md:text-xl font-semibold tabular-nums">
+                  kr {nok(totalBudget)}
+                </dd>
+              </div>
+              <div className="rounded-md border p-3 md:min-w-0">
+                <dt className="text-xs text-muted-foreground">Remaining</dt>
+                <dd className="text-lg md:text-xl font-semibold tabular-nums">
+                  kr {nok(Math.max(totalBudget - act, 0))}
+                </dd>
+              </div>
+            </dl>
 
-      
-
-      {/* Progress bars */}
-      <div className="space-y-2">
-        <div className="text-xs text-muted-foreground">Estimated {pctEst}%</div>
-        <div
-          className="h-2 w-full overflow-hidden rounded bg-muted"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={pctEst}
-        >
-          <div className="h-full bg-primary" style={{ width: `${pctEst}%` }} />
-        </div>
-        <div className="text-xs text-muted-foreground">Actual {pctAct}%</div>
-        <div
-          className="h-2 w-full overflow-hidden rounded bg-muted"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={pctAct}
-        >
-          <div className="h-full bg-primary" style={{ width: `${pctAct}%` }} />
-        </div>
-      </div>
-    </CardContent>
-  </Card>
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground">Estimated {pctEst}%</div>
+              <div className="h-2 w-full overflow-hidden rounded bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pctEst}>
+                <div className="h-full bg-primary" style={{ width: `${pctEst}%` }} />
+              </div>
+              <div className="text-xs text-muted-foreground">Actual {pctAct}%</div>
+              <div className="h-2 w-full overflow-hidden rounded bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pctAct}>
+                <div className="h-full bg-primary" style={{ width: `${pctAct}%` }} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Overall task progress */}
         <Card style={{ breakInside: 'avoid' }}>
@@ -215,15 +216,14 @@ export default async function ProjectReportPage({
               );
             })}
           </ul>
-          
         </CardContent>
       </Card>
 
-      {/* Budget by room (combined) */}
+      {/* Budget by room (tasks only) + General row for items */}
       <Card style={{ breakInside: 'avoid' }}>
         <CardHeader className="border-0 pb-0">
           <CardTitle className="text-base">Budget by room</CardTitle>
-          <CardDescription>Items + tasks, estimated vs actual</CardDescription>
+          <CardDescription>Tasks per room (+ general items without a room)</CardDescription>
         </CardHeader>
         <CardContent className="pt-3">
           <div className="overflow-auto">
@@ -246,6 +246,13 @@ export default async function ProjectReportPage({
                     </tr>
                   );
                 })}
+                {(general.est > 0 || general.act > 0) && (
+                  <tr className="border-t">
+                    <td className="px-4 py-3 font-medium">General (no room)</td>
+                    <td className="px-4 py-3">kr {nok(general.est)}</td>
+                    <td className="px-4 py-3">kr {nok(general.act)}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

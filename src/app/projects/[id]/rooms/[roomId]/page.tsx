@@ -1,11 +1,11 @@
+// app/projects/[id]/rooms/[roomId]/page.tsx
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ResponsiveGrid } from '@/components/layout/ResponsiveGrid';
-import { EmptyState } from '@/components/ui/empty-state';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import TaskList from './TaskList';
@@ -20,27 +20,41 @@ type TaskRow = {
   created_at: string;
 };
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function RoomDetailPage({
   params,
 }: {
   params: Promise<{ id: string; roomId: string }>;
 }) {
   const { id, roomId } = await params;
-  const supabase = await createSupabaseServer();
 
+  // ✅ persist refreshed tokens to cookies in prod
+  const supabase = await createSupabaseServer({ allowCookieWrite: true });
+
+  // Auth
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect(`/login?next=/projects/${id}/rooms/${roomId}`);
+
+  // Ensure the project belongs to the user
   const { data: project } = await supabase
     .from('projects')
-    .select('id,name')
+    .select('id,name,owner_id')
     .eq('id', id)
+    .eq('owner_id', user.id)
     .single();
   if (!project) notFound();
 
+  // Ensure the room belongs to the project
   const { data: room } = await supabase
     .from('rooms')
     .select('id,name,sort,project_id')
+    .eq('project_id', project.id)
     .eq('id', roomId)
-    .maybeSingle();
-  if (!room || room.project_id !== project.id) notFound();
+    .single();
+  if (!room) notFound();
 
   const { data: tasks } = await supabase
     .from('tasks')
@@ -56,52 +70,48 @@ export default async function RoomDetailPage({
   const notStarted = total - done - inProgress;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  // ===== Server actions =====
+  // ===== Server actions (use allowCookieWrite here too) =====
   async function renameRoom(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const room_id = String(formData.get('room_id'));
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
-    await supa.from('rooms').update({ name }).eq('id', room_id);
+    await supa.from('rooms').update({ name }).eq('id', room_id).eq('project_id', project_id);
     revalidatePath(`/projects/${project_id}/rooms/${room_id}`);
     revalidatePath(`/projects/${project_id}/rooms`);
     revalidatePath(`/projects/${project_id}`);
-    revalidatePath(`/projects/${project_id}/budget`); 
+    revalidatePath(`/projects/${project_id}/budget`);
     revalidatePath(`/projects/${project_id}/report`);
-
   }
 
   async function deleteRoom(formData: FormData) {
-  'use server'
-  const supa = await createSupabaseServer({ allowCookieWrite: true })
-  const project_id = String(formData.get('project_id'))
-  const room_id = String(formData.get('room_id'))
-
-  if (!project_id || !room_id) return
-
-  await supa.from('rooms').delete().eq('id', room_id).eq('project_id', project_id)
-
-  // refresh rooms list and jump there with a toast flag
+    'use server';
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
+    const project_id = String(formData.get('project_id'));
+    const room_id = String(formData.get('room_id'));
+    if (!project_id || !room_id) return;
+    await supa.from('rooms').delete().eq('id', room_id).eq('project_id', project_id);
     revalidatePath(`/projects/${project_id}/rooms/${room_id}`);
     revalidatePath(`/projects/${project_id}/rooms`);
     revalidatePath(`/projects/${project_id}`);
-    revalidatePath(`/projects/${project_id}/budget`); 
+    revalidatePath(`/projects/${project_id}/budget`);
     revalidatePath(`/projects/${project_id}/report`);
-    redirect(`/projects/${project_id}/rooms?toast=room_deleted`)
-
+    redirect(`/projects/${project_id}/rooms?toast=room_deleted`);
   }
 
   async function addTask(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const room_id = String(formData.get('room_id'));
     const title = String(formData.get('title') || '').trim();
-    const notes = String(formData.get('notes') || '').trim() || null;
-    const estimate_cost = Number(formData.get('estimate_cost') || 0) || 0;
+    const notesRaw = String(formData.get('notes') || '').trim();
+    const estimate_cost_raw = String(formData.get('estimate_cost') || '');
     if (!title) return;
+    const estimate_cost = estimate_cost_raw ? Number(estimate_cost_raw.replace(/[^0-9.-]/g, '')) : 0;
+    const notes = notesRaw || null;
     await supa.from('tasks').insert({
       project_id,
       room_id,
@@ -113,14 +123,13 @@ export default async function RoomDetailPage({
     revalidatePath(`/projects/${project_id}/rooms/${room_id}`);
     revalidatePath(`/projects/${project_id}/rooms`);
     revalidatePath(`/projects/${project_id}`);
-    revalidatePath(`/projects/${project_id}/budget`); 
+    revalidatePath(`/projects/${project_id}/budget`);
     revalidatePath(`/projects/${project_id}/report`);
-
   }
 
   async function updateTaskStatus(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const room_id = String(formData.get('room_id'));
     const task_id = String(formData.get('task_id'));
@@ -130,25 +139,28 @@ export default async function RoomDetailPage({
     revalidatePath(`/projects/${project_id}/rooms/${room_id}`);
     revalidatePath(`/projects/${project_id}/rooms`);
     revalidatePath(`/projects/${project_id}`);
-    revalidatePath(`/projects/${project_id}/budget`); 
+    revalidatePath(`/projects/${project_id}/budget`);
     revalidatePath(`/projects/${project_id}/report`);
-
   }
 
   async function updateTask(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const room_id = String(formData.get('room_id'));
     const task_id = String(formData.get('task_id'));
     const title = String(formData.get('title') || '').trim();
-    const notes = String(formData.get('notes') || '').trim() || null;
+    const notesRaw = String(formData.get('notes') || '').trim();
     const estimate_cost_raw = String(formData.get('estimate_cost') || '');
     const actual_cost_raw = String(formData.get('actual_cost') || '');
-    const estimate_cost = estimate_cost_raw === '' ? null : Number(estimate_cost_raw);
-    const actual_cost = actual_cost_raw === '' ? null : Number(actual_cost_raw);
-
     if (!title) return;
+
+    const estimate_cost =
+      estimate_cost_raw === '' ? null : Number(estimate_cost_raw.replace(/[^0-9.-]/g, ''));
+    const actual_cost =
+      actual_cost_raw === '' ? null : Number(actual_cost_raw.replace(/[^0-9.-]/g, ''));
+    const notes = notesRaw || null;
+
     await supa
       .from('tasks')
       .update({ title, notes, estimate_cost, actual_cost })
@@ -160,12 +172,11 @@ export default async function RoomDetailPage({
     revalidatePath(`/projects/${project_id}`);
     revalidatePath(`/projects/${project_id}/budget`);
     revalidatePath(`/projects/${project_id}/report`);
-
   }
 
   async function deleteTask(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const room_id = String(formData.get('room_id'));
     const task_id = String(formData.get('task_id'));
@@ -174,9 +185,8 @@ export default async function RoomDetailPage({
     revalidatePath(`/projects/${project_id}/rooms`);
     revalidatePath(`/projects/${project_id}`);
     revalidatePath(`/projects/${project_id}/budget`);
-    revalidatePath(`/projects/${project_id}/report`); 
+    revalidatePath(`/projects/${project_id}/report`);
   }
-
 
   // ===== UI =====
   return (
@@ -268,43 +278,6 @@ export default async function RoomDetailPage({
             />
           </CardContent>
         </Card>
-
-        {/* Keep placeholders for future room-level budget/docs */}
-        {/* <Card>
-          <CardHeader className="border-0 pb-0">
-            <CardTitle className="text-base">Budget (room)</CardTitle>
-            <CardDescription>Track estimates and actuals per room.</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-3">
-            <EmptyState
-              title="No budget items linked"
-              description="When you add budget items per room, they’ll appear here."
-            />
-          </CardContent>
-          <CardFooter className="flex justify-end">
-            <Link href={`/projects/${id}/budget`}>
-              <Button size="sm" variant="secondary">Open project budget</Button>
-            </Link>
-          </CardFooter>
-        </Card>
-
-        <Card>
-          <CardHeader className="border-0 pb-0">
-            <CardTitle className="text-base">Documents (room)</CardTitle>
-            <CardDescription>Blueprints, photos, invoices — all in one place.</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-3">
-            <EmptyState
-              title="No documents yet"
-              description="Upload documents for this room to keep everything organized."
-            />
-          </CardContent>
-          <CardFooter className="flex justify-end">
-            <Link href={`/projects/${id}/documents`}>
-              <Button size="sm" variant="secondary">Open project docs</Button>
-            </Link>
-          </CardFooter>
-        </Card> */}
       </ResponsiveGrid>
     </div>
   );

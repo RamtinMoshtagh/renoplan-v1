@@ -1,34 +1,33 @@
 'use client';
 
-import * as React from 'react';
+import { useEffect, useState } from 'react';
+import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
-
-function getSystemTheme() {
-  if (typeof window === 'undefined') return 'light';
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
+import { Moon, Sun } from 'lucide-react';
 
 export function ThemeToggle() {
-  const [theme, setTheme] = React.useState<'light' | 'dark'>(() => {
-    if (typeof window === 'undefined') return 'light';
-    return (localStorage.getItem('theme') as 'light' | 'dark') || getSystemTheme();
-  });
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
 
-  React.useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') root.classList.add('dark');
-    else root.classList.remove('dark');
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+  // Avoid SSR/CSR mismatch: only render theme-aware UI after mount.
+  useEffect(() => setMounted(true), []);
+
+  const toggle = () => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
+
+  // Render a neutral placeholder on the server to keep markup identical.
+  if (!mounted) {
+    return (
+      <Button variant="outline" size="sm" aria-label="Toggle theme">
+        <span className="inline-block h-4 w-4" />
+        <span className="sr-only">Toggle theme</span>
+      </Button>
+    );
+  }
 
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      aria-label="Toggle theme"
-      onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-    >
-      {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+    <Button variant="outline" size="sm" aria-label="Toggle theme" onClick={toggle}>
+      {resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      <span className="sr-only">Toggle theme</span>
     </Button>
   );
 }

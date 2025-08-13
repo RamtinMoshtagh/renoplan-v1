@@ -12,7 +12,11 @@ export function ResponsiveGrid({
   return (
     <div
       className={cn('auto-grid', className)}
-      style={{ '--min-card': `${min}px`, '--gap': typeof gap === 'number' ? `${gap}px` : gap, ...style } as React.CSSProperties}
+      style={{
+        '--min-card': `${min}px`,
+        '--gap': typeof gap === 'number' ? `${gap}px` : gap,
+        ...style,
+      } as React.CSSProperties}
       {...props}
     />
   );

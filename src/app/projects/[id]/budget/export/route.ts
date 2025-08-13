@@ -1,43 +1,77 @@
+// app/api/projects/[id]/budget/export/route.ts
 import { NextResponse } from 'next/server';
-import { createSupabaseServer } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
 export async function GET(
   _req: Request,
-  ctx: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
-  const { id } = await ctx.params;
+  const projectId = params.id;
 
-  const supabase = await createSupabaseServer();
+  const reqCookies = await cookies();
+  const base = NextResponse.next();
 
-  // RLS-protected: ensure a signed-in user
-  const { data: userResult } = await supabase.auth.getUser();
-  if (!userResult?.user) {
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name) {
+          return reqCookies.get(name)?.value;
+        },
+        set(name, value, options) {
+          base.cookies.set({ name, value, ...options });
+        },
+        remove(name, options) {
+          base.cookies.set({ name, value: '', ...options, maxAge: 0 });
+        },
+      },
+    }
+  );
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    const h = new Headers(base.headers);
+    h.set('content-type', 'application/json');
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: h,
+    });
   }
 
-  const [{ data: items }, { data: rooms }] = await Promise.all([
-    supabase
-      .from('budget_items')
-      .select('id,name,amount_estimated,amount_actual,room_id')
-      .eq('project_id', id)
-      .order('created_at', { ascending: true }),
-    supabase
-      .from('rooms')
-      .select('id,name')
-      .eq('project_id', id),
-  ]);
+  const { data: items, error } = await supabase
+    .from('budget_items')
+    .select('id,category,amount_estimated,amount_actual,notes,created_at')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true });
 
-  const roomName = new Map<string, string>();
-  (rooms ?? []).forEach((r) => roomName.set(r.id, r.name ?? ''));
+  if (error) {
+    const h = new Headers(base.headers);
+    h.set('content-type', 'application/json');
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 400,
+      headers: h,
+    });
+  }
 
-  const header = ['id', 'name', 'amount_estimated', 'amount_actual', 'room_id', 'room_name'];
+  const header = [
+    'id',
+    'category',
+    'amount_estimated',
+    'amount_actual',
+    'notes',
+    'created_at',
+  ];
   const rows = (items ?? []).map((r) => [
     r.id,
-    r.name ?? '',
+    r.category ?? '',
     String(r.amount_estimated ?? 0),
     String(r.amount_actual ?? 0),
-    r.room_id ?? '',
-    r.room_id ? (roomName.get(r.room_id) ?? '') : '',
+    r.notes ?? '',
+    (r as any).created_at ?? '',
   ]);
 
   const csv = [header, ...rows]
@@ -53,12 +87,13 @@ export async function GET(
     )
     .join('\n');
 
-  return new NextResponse(csv, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="project-${id}-budget.csv"`,
-      'Cache-Control': 'no-store',
-    },
-  });
+  const h = new Headers(base.headers);
+  h.set('content-type', 'text/csv; charset=utf-8');
+  h.set(
+    'content-disposition',
+    `attachment; filename="project-${projectId}-budget.csv"`
+  );
+  h.set('cache-control', 'no-store');
+
+  return new Response(csv, { status: 200, headers: h });
 }

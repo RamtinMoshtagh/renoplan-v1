@@ -1,23 +1,21 @@
+// app/(app)/projects/[id]/budget/page.tsx
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import { PageHeader } from '@/components/layout/PageHeader';
-import {
-  Card, CardContent, CardHeader, CardTitle, CardDescription,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { nok } from '@/lib/numbers';
 import BudgetToolbar from './BudgetToolbar';
 
-
 type BudgetItemRow = {
   id: string;
-  name: string | null;
+  category: 'materials' | 'labor' | 'permits' | 'fees' | 'other';
+  notes: string | null;
   amount_estimated: number | null;
   amount_actual: number | null;
-  room_id: string | null;
   created_at: string;
 };
 
@@ -38,9 +36,20 @@ type CombinedRow = {
   name: string;
   amount_estimated: number | null;
   amount_actual: number | null;
-  room_id: string | null;
+  room_id: string | null;      // tasks only (budget: always null)
   created_at: string;
+  // budget-only extras
+  _category?: BudgetItemRow['category'];
+  _notes?: string | null;
 };
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+function titleCase(s: string) {
+  return s.replace(/(^|\s|-|_)\w/g, (m) => m.toUpperCase()).replace(/[_-]/g, ' ');
+}
 
 export default async function BudgetPage({
   params,
@@ -51,13 +60,16 @@ export default async function BudgetPage({
 }) {
   const { id } = await params;
   const sp = (await searchParams) ?? {};
-const filterRoom = (sp.room ?? 'all').toString();
-const typeFilter = (sp.type ?? 'both') as 'both' | 'budget' | 'task';
-const q = (sp.q ?? '').toString().trim().toLowerCase();
-const sortKey = (sp.sort ?? 'created') as 'created' | 'name' | 'est' | 'act' | 'room' | 'type';
-const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
+  const filterRoom = (sp.room ?? 'all').toString();
+  const typeFilter = (sp.type ?? 'both') as 'both' | 'budget' | 'task';
+  const q = (sp.q ?? '').toString().trim().toLowerCase();
+  const sortKey = (sp.sort ?? 'created') as 'created' | 'name' | 'est' | 'act' | 'room' | 'type';
+  const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
 
-  const supabase = await createSupabaseServer();
+  // Read session; allow cookie write so refreshed tokens persist in prod
+  const supabase = await createSupabaseServer({ allowCookieWrite: true });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect(`/login?next=/projects/${id}/budget`);
 
   const { data: project } = await supabase
     .from('projects')
@@ -70,7 +82,7 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
   const [{ data: items }, { data: tasks }, { data: rooms }] = await Promise.all([
     supabase
       .from('budget_items')
-      .select('id,name,amount_estimated,amount_actual,room_id,created_at')
+      .select('id,category,notes,amount_estimated,amount_actual,created_at')
       .eq('project_id', project.id)
       .order('created_at', { ascending: true }) as unknown as { data: BudgetItemRow[] | null },
     supabase
@@ -84,16 +96,18 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
   const roomName = new Map<string, string>();
   (rooms ?? []).forEach((r) => roomName.set(r.id, r.name ?? ''));
 
-  // Merge items + tasks
+  // Merge items + tasks (budget items have no room_id; show N/A/Unassigned)
   let combined: CombinedRow[] = [
     ...(items ?? []).map((i) => ({
       id: i.id,
       source: 'budget' as const,
-      name: i.name ?? '',
+      name: (i.notes?.trim() ? i.notes!.trim() : titleCase(i.category)),
       amount_estimated: i.amount_estimated,
       amount_actual: i.amount_actual,
-      room_id: i.room_id,
+      room_id: null, // budget items are not tied to rooms
       created_at: i.created_at,
+      _category: i.category,
+      _notes: i.notes ?? null,
     })),
     ...(tasks ?? []).map((t) => ({
       id: t.id,
@@ -105,13 +119,13 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
       created_at: t.created_at,
     })),
   ];
-    // --- Filters + search ---
+
   // Type filter
   if (typeFilter !== 'both') {
     combined = combined.filter((r) => r.source === typeFilter);
   }
 
-  // Room filter
+  // Room filter (only meaningful for tasks)
   combined = combined.filter((r) => {
     if (filterRoom === 'all') return true;
     if (filterRoom === 'unassigned') return !r.room_id;
@@ -123,9 +137,7 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
     combined = combined.filter((r) => (r.name || '').toLowerCase().includes(q));
   }
 
-
   // Sort in-memory
-    // Sort in-memory
   combined = combined.sort((a, b) => {
     const dir = sortDir === 'desc' ? -1 : 1;
     switch (sortKey) {
@@ -150,13 +162,11 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
         return an.localeCompare(bn) * dir;
       }
       case 'type': {
-        // budget before task when asc
         const an = a.source;
         const bn = b.source;
         return an < bn ? -1 * dir : an > bn ? 1 * dir : 0;
       }
       default: {
-        // 'created' by timestamp
         const at = new Date(a.created_at).getTime();
         const bt = new Date(b.created_at).getTime();
         return at === bt ? 0 : at < bt ? -1 * dir : 1 * dir;
@@ -164,30 +174,28 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
     }
   });
 
-
   const sumEst = combined.reduce((s, r) => s + Number(r.amount_estimated ?? 0), 0);
   const sumAct = combined.reduce((s, r) => s + Number(r.amount_actual ?? 0), 0);
 
-  // ===== Server actions (only apply to budget_items) =====
+  // ===== Server actions (budget_items only) =====
   async function addItem(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
-    const name = String(formData.get('name') || '').trim() || null;
+    const category = (formData.get('category') as BudgetItemRow['category']) || 'other';
+    const notes = (formData.get('notes') as string | null)?.toString().trim() || null;
 
     const estRaw = String(formData.get('amount_estimated') || '').trim();
     const actRaw = String(formData.get('amount_actual') || '').trim();
     const amount_estimated = estRaw ? Number(estRaw.replace(/[^0-9.-]/g, '')) : null;
     const amount_actual = actRaw ? Number(actRaw.replace(/[^0-9.-]/g, '')) : null;
 
-    const room_id = String(formData.get('room_id') || '') || null;
-
     await supa.from('budget_items').insert({
       project_id,
-      name,
+      category,
+      notes,
       amount_estimated,
       amount_actual,
-      room_id,
     });
 
     revalidatePath(`/projects/${project_id}/budget`);
@@ -196,24 +204,24 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
 
   async function updateItem(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const id = String(formData.get('id'));
-    const name = (formData.get('name') as string | null)?.trim() ?? undefined;
+
+    const category = formData.get('category') as BudgetItemRow['category'] | null;
+    const notesVal = (formData.get('notes') as string | null) ?? undefined;
+    const notes = notesVal === null ? undefined : (notesVal?.trim() || null);
 
     const estRaw = String(formData.get('amount_estimated') ?? '');
     const actRaw = String(formData.get('amount_actual') ?? '');
     const amount_estimated = estRaw === '' ? undefined : Number(estRaw.replace(/[^0-9.-]/g, ''));
     const amount_actual = actRaw === '' ? undefined : Number(actRaw.replace(/[^0-9.-]/g, ''));
 
-    const room_id_val = String(formData.get('room_id') ?? '');
-    const room_id = room_id_val === '' ? null : room_id_val;
-
     const patch: Record<string, any> = {};
-    if (name !== undefined) patch.name = name || null;
+    if (category) patch.category = category;
+    if (notes !== undefined) patch.notes = notes;
     if (amount_estimated !== undefined) patch.amount_estimated = isNaN(amount_estimated) ? null : amount_estimated;
     if (amount_actual !== undefined) patch.amount_actual = isNaN(amount_actual) ? null : amount_actual;
-    patch.room_id = room_id;
 
     await supa.from('budget_items').update(patch).eq('id', id);
     revalidatePath(`/projects/${project_id}/budget`);
@@ -222,7 +230,7 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
 
   async function deleteItem(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const id = String(formData.get('id'));
     await supa.from('budget_items').delete().eq('id', id);
@@ -230,7 +238,6 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
     revalidatePath(`/projects/${project_id}/report`);
   }
 
-  // ===== UI =====
   return (
     <div className="space-y-4 md:space-y-6">
       <PageHeader
@@ -238,8 +245,12 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
         description="Items and task costs combined. Edit budget items here; edit tasks in their room."
         actions={
           <>
-            <Link href={`/projects/${id}`}><Button variant="secondary">Back to Overview</Button></Link>
-            <Link href={`/projects/${id}/budget/export`}><Button>Export CSV</Button></Link>
+            <Link href={`/projects/${id}`} prefetch={false}>
+              <Button variant="secondary">Back to Overview</Button>
+            </Link>
+            <Link href={`/api/projects/${id}/budget/export`} prefetch={false}>
+              <Button>Export CSV</Button>
+            </Link>
           </>
         }
       />
@@ -272,17 +283,16 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
         </CardContent>
       </Card>
 
-     <BudgetToolbar
-  rooms={(rooms ?? []) as RoomRow[]}
-  initial={{
-    room: filterRoom,
-    type: typeFilter,
-    q,
-    sort: sortKey,
-    dir: sortDir,
-  }}
-/>
-
+      <BudgetToolbar
+        rooms={(rooms ?? []) as RoomRow[]}
+        initial={{
+          room: filterRoom,
+          type: typeFilter,
+          q,
+          sort: sortKey,
+          dir: sortDir,
+        }}
+      />
 
       {/* Desktop table */}
       <Card className="overflow-hidden hidden md:block">
@@ -308,15 +318,23 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
                     <td className="px-4 py-3">{isBudget ? 'Item' : 'Task'}</td>
                     <td className="px-4 py-2">
                       {isBudget ? (
-                        <form action={updateItem} className="flex gap-2">
+                        <form action={updateItem} className="flex gap-2 items-center">
                           <input type="hidden" name="project_id" value={project.id} />
                           <input type="hidden" name="id" value={row.id} />
-                          <Input name="name" defaultValue={row.name ?? ''} className="h-9 w-[220px]" />
+                          <Input name="notes" defaultValue={row._notes ?? ''} className="h-9 w-[260px]" placeholder="Notes / label" />
+                          <select name="category" defaultValue={row._category ?? 'other'} className="h-9 rounded-md border bg-background px-2 w-[160px]">
+                            <option value="materials">Materials</option>
+                            <option value="labor">Labor</option>
+                            <option value="permits">Permits</option>
+                            <option value="fees">Fees</option>
+                            <option value="other">Other</option>
+                          </select>
                           <Button size="sm" variant="outline">Save</Button>
                         </form>
                       ) : (
                         <Link
                           href={`/projects/${id}/rooms/${row.room_id ?? ''}`}
+                          prefetch={false}
                           className="underline-offset-4 hover:underline"
                         >
                           {row.name}
@@ -326,7 +344,7 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
 
                     <td className="px-4 py-2">
                       {isBudget ? (
-                        <form action={updateItem} className="flex gap-2">
+                        <form action={updateItem} className="flex gap-2 items-center">
                           <input type="hidden" name="project_id" value={project.id} />
                           <input type="hidden" name="id" value={row.id} />
                           <Input name="amount_estimated" type="number" defaultValue={row.amount_estimated ?? ''} className="h-9 w-[140px]" />
@@ -339,7 +357,7 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
 
                     <td className="px-4 py-2">
                       {isBudget ? (
-                        <form action={updateItem} className="flex gap-2">
+                        <form action={updateItem} className="flex gap-2 items-center">
                           <input type="hidden" name="project_id" value={project.id} />
                           <input type="hidden" name="id" value={row.id} />
                           <Input name="amount_actual" type="number" defaultValue={row.amount_actual ?? ''} className="h-9 w-[140px]" />
@@ -351,18 +369,9 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
                     </td>
 
                     <td className="px-4 py-2">
+                      {/* Budget items have no room; tasks show room name */}
                       {isBudget ? (
-                        <form action={updateItem} className="flex gap-2 items-center">
-                          <input type="hidden" name="project_id" value={project.id} />
-                          <input type="hidden" name="id" value={row.id} />
-                          <select name="room_id" defaultValue={row.room_id ?? ''} className="h-9 rounded-md border bg-background px-2 w-[220px]">
-                            <option value="">Unassigned</option>
-                            {(rooms ?? []).map((r: RoomRow) => (
-                              <option key={r.id} value={r.id}>{r.name ?? 'Untitled'}</option>
-                            ))}
-                          </select>
-                          <Button size="sm" variant="outline">Save</Button>
-                        </form>
+                        <div className="text-muted-foreground">—</div>
                       ) : (
                         <div>{row.room_id ? (roomName.get(row.room_id) || 'Unknown room') : 'Unassigned'}</div>
                       )}
@@ -378,6 +387,7 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
                       ) : (
                         <Link
                           href={`/projects/${id}/rooms/${row.room_id ?? ''}`}
+                          prefetch={false}
                           className="text-sm underline-offset-4 hover:underline text-muted-foreground"
                         >
                           Edit in room
@@ -414,19 +424,29 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
                   {row.name || (isBudget ? `Item ${i + 1}` : `Task ${i + 1}`)}
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  {isBudget ? 'Item' : 'Task'} • {row.room_id ? (roomName.get(row.room_id) || 'Unknown room') : 'Unassigned'}
+                  {isBudget ? 'Item' : 'Task'} • {isBudget ? '—' : (row.room_id ? (roomName.get(row.room_id) || 'Unknown room') : 'Unassigned')}
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-3 space-y-3">
                 {isBudget ? (
                   <>
-                    {/* UPDATE (budget item) */}
+                    {/* UPDATE budget item */}
                     <form action={updateItem} className="grid grid-cols-2 gap-2">
                       <input type="hidden" name="project_id" value={project.id} />
                       <input type="hidden" name="id" value={row.id} />
                       <label className="grid gap-1 col-span-2">
-                        <span className="text-xs text-muted-foreground">Name</span>
-                        <Input name="name" defaultValue={row.name ?? ''} />
+                        <span className="text-xs text-muted-foreground">Notes / label</span>
+                        <Input name="notes" defaultValue={row._notes ?? ''} />
+                      </label>
+                      <label className="grid gap-1 col-span-2">
+                        <span className="text-xs text-muted-foreground">Category</span>
+                        <select name="category" defaultValue={row._category ?? 'other'} className="h-9 rounded-md border bg-background px-2">
+                          <option value="materials">Materials</option>
+                          <option value="labor">Labor</option>
+                          <option value="permits">Permits</option>
+                          <option value="fees">Fees</option>
+                          <option value="other">Other</option>
+                        </select>
                       </label>
                       <label className="grid gap-1">
                         <span className="text-xs text-muted-foreground">Estimated</span>
@@ -436,21 +456,12 @@ const sortDir: 'asc' | 'desc' = sp.dir === 'desc' ? 'desc' : 'asc';
                         <span className="text-xs text-muted-foreground">Actual</span>
                         <Input name="amount_actual" type="number" defaultValue={row.amount_actual ?? ''} />
                       </label>
-                      <label className="col-span-2 grid gap-1">
-                        <span className="text-xs text-muted-foreground">Room</span>
-                        <select name="room_id" defaultValue={row.room_id ?? ''} className="h-9 rounded-md border bg-background px-2">
-                          <option value="">Unassigned</option>
-                          {(rooms ?? []).map((r: RoomRow) => (
-                            <option key={r.id} value={r.id}>{r.name ?? 'Untitled'}</option>
-                          ))}
-                        </select>
-                      </label>
                       <div className="col-span-2 flex gap-2 justify-end">
                         <Button size="sm" variant="outline">Save</Button>
                       </div>
                     </form>
 
-                    {/* DELETE (sibling, not nested) */}
+                    {/* DELETE */}
                     <form action={deleteItem} className="flex justify-end">
                       <input type="hidden" name="project_id" value={project.id} />
                       <input type="hidden" name="id" value={row.id} />

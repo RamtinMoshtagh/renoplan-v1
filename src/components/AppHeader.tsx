@@ -41,7 +41,7 @@ export default async function AppHeader() {
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
           <Button asChild variant="outline" size="sm">
-            <Link href="/logout?next=/marketing">Sign out</Link>
+            <Link href="/auth/logout?next=/marketing">Sign out</Link>
           </Button>
 
           {/* Mobile menu */}

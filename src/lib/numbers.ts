@@ -1,4 +1,8 @@
-export function nok(n: number | string | null | undefined) {
-  const num = Number(n ?? 0);
-  return num.toLocaleString('no-NO', { minimumFractionDigits: 0 });
+// src/lib/numbers.ts
+/** Deterministic formatter: 1234567 -> "1 234 567" */
+export function nok(value: number | null | undefined) {
+  const n = Math.round(Number(value ?? 0));
+  const sign = n < 0 ? '-' : '';
+  const s = Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${sign}${s}`;
 }

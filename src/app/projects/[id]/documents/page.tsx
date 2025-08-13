@@ -1,4 +1,4 @@
-// src/app/projects/[id]/documents/page.tsx
+// app/projects/[id]/documents/page.tsx
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
@@ -11,14 +11,18 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ToastLite } from '@/components/ui/toast-lite';
+import { formatDateYMD } from '@/lib/dates';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 type ListedFile = {
   name: string;
   updated_at?: string;
   metadata?: { size?: number; mimetype?: string };
 };
+
 type RoomRow = { id: string; name: string; sort: number };
 
 const BUCKET = 'project-docs';
@@ -32,10 +36,15 @@ export default async function DocsPage({
 }) {
   const { id } = await params;
   const sp = (await searchParams) ?? {};
-  const q = (sp.q ?? '').toLowerCase().trim();
+  const q = (sp.q ?? '').toString().toLowerCase().trim();
   const toastMsg = sp.toast ?? undefined;
 
-  const supabase = await createSupabaseServer();
+  // ✅ Allow cookie writes so any session refresh persists in prod
+  const supabase = await createSupabaseServer({ allowCookieWrite: true });
+
+  // Ensure user (also required by your storage RLS)
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect(`/login?next=/projects/${id}/documents`);
 
   const { data: project } = await supabase
     .from('projects')
@@ -50,9 +59,6 @@ export default async function DocsPage({
     .eq('project_id', project.id)
     .order('sort', { ascending: true });
 
-  const roomName = new Map<string, string>();
-  (rooms ?? []).forEach((r) => roomName.set(r.id, r.name));
-
   // ---------- helpers ----------
   async function listPath(path: string) {
     const { data, error } = await supabase.storage
@@ -61,10 +67,11 @@ export default async function DocsPage({
     if (error) return [] as ListedFile[];
     return (data ?? []) as ListedFile[];
   }
-  function prettySize(bytes: number) {
-    if (!bytes || bytes < 1024) return `${bytes ?? 0} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  function prettySize(bytes?: number) {
+    const b = Number(bytes ?? 0);
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    return `${(b / (1024 * 1024)).toFixed(1)} MB`;
   }
   function kindOf(name: string) {
     const n = name.toLowerCase();
@@ -150,10 +157,12 @@ export default async function DocsPage({
   // ---------- actions ----------
   async function uploadDocs(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
+
     const project_id = String(formData.get('project_id'));
     const room_id = String(formData.get('room_id') || ''); // '' or 'general' => general
     const files = formData.getAll('files') as File[];
+
     if (!files.length) {
       redirect(`/projects/${project_id}/documents?toast=No%20files%20selected`);
     }
@@ -185,13 +194,15 @@ export default async function DocsPage({
       revalidatePath(`/projects/${project_id}/rooms/${room_id}`);
     }
 
-    const msg = uploaded > 0 ? `Uploaded%20${uploaded}%20file${uploaded > 1 ? 's' : ''}` : 'No%20files%20uploaded';
+    const msg =
+      uploaded > 0 ? `Uploaded%20${uploaded}%20file${uploaded > 1 ? 's' : ''}` : 'No%20files%20uploaded';
     redirect(`/projects/${project_id}/documents?toast=${msg}`);
   }
 
   async function deleteDoc(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
+
     const project_id = String(formData.get('project_id'));
     const key = String(formData.get('key') || '');
     const room_id = String(formData.get('room_id') || '');
@@ -217,7 +228,11 @@ export default async function DocsPage({
       <PageHeader
         title="Documents"
         description="Upload and manage project files. Grouped by room."
-        actions={<Link href={`/projects/${id}`}><Button variant="secondary">Back to Overview</Button></Link>}
+        actions={
+          <Link href={`/projects/${id}`}>
+            <Button variant="secondary">Back to Overview</Button>
+          </Link>
+        }
       />
 
       {/* Upload */}
@@ -227,7 +242,6 @@ export default async function DocsPage({
           <CardDescription>PNG, JPG, PDF, CSV, DOCX, XLSX. Max 20MB per file.</CardDescription>
         </CardHeader>
         <CardContent className="pt-3">
-          {/* Desktop alignment: hide label on md+ so inputs align in one row */}
           <form action={uploadDocs} className="grid gap-3 md:grid-cols-[1fr,260px,120px] items-center">
             <input type="hidden" name="project_id" value={project.id} />
             <div className="min-w-0">
@@ -290,8 +304,7 @@ export default async function DocsPage({
                         <CardHeader className="border-0 pb-0">
                           <CardTitle className="text-sm truncate">{f.name}</CardTitle>
                           <CardDescription className="text-xs">
-                            {f.updated_at ? new Date(f.updated_at).toLocaleDateString() : ''}{' '}
-                            • {prettySize(f.size)}
+                            {f.updated_at ? formatDateYMD(f.updated_at) : ''} • {prettySize(f.size)}
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="pt-3 space-y-3">

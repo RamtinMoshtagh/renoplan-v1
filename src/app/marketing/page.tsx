@@ -1,5 +1,6 @@
-import type { Metadata } from 'next'
-import LandingPageClient from '@/components/marketing/LandingPageClient'
+// app/marketing/page.tsx
+import type { Metadata } from 'next';
+import LandingPageClient from '@/components/marketing/LandingPageClient';
 
 export const metadata: Metadata = {
   title: 'RenoPlan — Renovation planning that actually helps',
@@ -15,8 +16,8 @@ export const metadata: Metadata = {
     locale: 'en_US',
     type: 'website',
   },
-}
+};
 
 export default function Page() {
-  return <LandingPageClient />
+  return <LandingPageClient />;
 }

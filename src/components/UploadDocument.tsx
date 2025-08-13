@@ -1,3 +1,4 @@
+// components/UploadDocument.tsx
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -6,70 +7,93 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
-export default function UploadDocument({ projectId }: { projectId: string }) {
+type Room = { id: string; name: string | null }
+
+export default function UploadDocument({
+  projectId,
+  rooms = [],
+  defaultRoom = 'general', // 'general' | <roomId>
+  writeDbRow = true,       // set false if you want storage-only
+}: {
+  projectId: string
+  rooms?: Room[]
+  defaultRoom?: string
+  writeDbRow?: boolean
+}) {
   const [loading, setLoading] = useState(false)
-  const [title, setTitle] = useState('')
-  const [type, setType] = useState<'receipt'|'invoice'|'photo'|'note'|'other'>('photo')
-  const [file, setFile] = useState<File | null>(null)
+  const [target, setTarget] = useState<string>(defaultRoom)
+  const [files, setFiles] = useState<FileList | null>(null)
   const router = useRouter()
 
-  async function handleUpload(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!file || !title) { toast.error('Title and file required'); return }
+    const list = files ? Array.from(files) : []
+    if (list.length === 0) { toast.error('Select at least one file'); return }
+
     setLoading(true)
     const supabase = supabaseBrowser()
-    const path = `${projectId}/${Date.now()}_${file.name}`
+    let uploaded = 0
 
-    const { data: upData, error: upErr } = await supabase.storage
-      .from('project-docs')
-      .upload(path, file, {
-        upsert: false,
-        contentType: file.type || undefined,
-        cacheControl: '3600',
-      })
+    for (const file of list) {
+      if (!file || file.size === 0) continue
+      if (file.size > 20 * 1024 * 1024) { toast.error(`${file.name}: over 20MB`); continue }
 
-    if (upErr) {
-      console.error('upload error:', upErr)
-      toast.error(upErr.message || 'Upload failed (storage)')
-      setLoading(false)
-      return
+      const safe = file.name.replace(/\s+/g, '-')
+      const key = target && target !== 'general'
+        ? `${projectId}/rooms/${target}/${Date.now()}-${safe}`
+        : `${projectId}/general/${Date.now()}-${safe}`
+
+      const { data, error } = await supabase
+        .storage
+        .from('project-docs')
+        .upload(key, file, {
+          upsert: false,
+          contentType: file.type || 'application/octet-stream',
+          cacheControl: '3600',
+        })
+
+      if (error) { toast.error(`${file.name}: ${error.message}`); continue }
+      uploaded += 1
+
+      if (writeDbRow) {
+        // optional metadata row (keeps /api/projects/:id/export documents working)
+        await supabase.from('documents').insert({
+          project_id: projectId,
+          type: 'other',
+          title: safe,
+          file_path: data?.path || key,
+        })
+      }
     }
 
-    const { error: dbErr } = await supabase
-      .from('documents')
-      .insert({ project_id: projectId, type, title, file_path: upData?.path || path })
-
-    if (dbErr) {
-      console.error('db insert error:', dbErr)
-      toast.error(dbErr.message || 'Could not save document')
-      setLoading(false)
-      return
-    }
-
-    toast.success('Uploaded')
+    toast.success(uploaded > 0 ? `Uploaded ${uploaded} file${uploaded > 1 ? 's' : ''}` : 'No files uploaded')
     setLoading(false)
-    setTitle(''); setFile(null)
+    setFiles(null)
+    router.replace(`/projects/${projectId}/documents?toast=Uploaded%20${uploaded}`)
     router.refresh()
   }
 
   return (
-    <form onSubmit={handleUpload} className="grid sm:grid-cols-5 gap-2">
-      <Input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Title" className="sm:col-span-2" required />
-      <select value={type} onChange={e=>setType(e.target.value as any)} className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm dark:border-neutral-800 dark:bg-neutral-900">
-        <option value="photo">Photo</option>
-        <option value="receipt">Receipt</option>
-        <option value="invoice">Invoice</option>
-        <option value="note">Note</option>
-        <option value="other">Other</option>
-      </select>
-      <input
-        type="file"
-        accept="image/*,.pdf,.png,.jpg,.jpeg,.webp,.gif"
-        onChange={e=>setFile(e.target.files?.[0] ?? null)}
-        className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm file:mr-3 file:rounded-md file:border file:border-neutral-300 file:bg-neutral-50 file:px-3 dark:border-neutral-800 dark:bg-neutral-900"
-        required
-      />
-      <Button disabled={loading} type="submit">{loading ? 'Uploading…' : 'Upload'}</Button>
+    <form onSubmit={onSubmit} className="grid gap-2 md:grid-cols-[1fr,260px,120px] items-end">
+      <div className="min-w-0">
+        <Input type="file" multiple onChange={e => setFiles(e.currentTarget.files)} />
+      </div>
+      <label className="grid gap-1">
+        <span className="text-sm font-medium md:sr-only">Target</span>
+        <select
+          value={target}
+          onChange={e => setTarget(e.target.value)}
+          className="h-10 rounded-md border bg-background px-3 text-sm"
+        >
+          <option value="general">General (no room)</option>
+          {rooms.map(r => (
+            <option key={r.id} value={r.id}>{r.name ?? 'Untitled'}</option>
+          ))}
+        </select>
+      </label>
+      <div>
+        <Button type="submit" disabled={loading}>{loading ? 'Uploading…' : 'Upload'}</Button>
+      </div>
     </form>
   )
 }

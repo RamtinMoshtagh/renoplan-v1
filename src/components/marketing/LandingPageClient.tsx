@@ -405,6 +405,9 @@ function FAQ() {
 }
 
 function SiteFooter() {
+  // Lock the year to whatever the client sees first and hush hydration diffs
+  const [year] = useState(() => new Date().getFullYear());
+
   return (
     <footer className="border-t">
       <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 py-8 text-sm text-muted-foreground md:flex-row md:px-6">
@@ -412,7 +415,7 @@ function SiteFooter() {
           <span className="inline-flex h-4 w-4 rounded bg-primary/80" />
           <span>RenoPlan</span>
           <span>·</span>
-          <span>© {new Date().getFullYear()}</span>
+          <span suppressHydrationWarning>© {year}</span>
         </div>
         <nav aria-label="Footer">
           <ul className="flex items-center gap-4">
@@ -423,5 +426,6 @@ function SiteFooter() {
         </nav>
       </div>
     </footer>
-  )
+  );
 }
+

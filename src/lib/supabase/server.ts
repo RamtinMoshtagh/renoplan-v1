@@ -1,28 +1,56 @@
-// src/lib/supabase/server.ts
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
-type Opts = { allowCookieWrite?: boolean }
+type Options = { allowCookieWrite?: boolean };
 
-export async function createSupabaseServer(opts: Opts = {}) {
-  const cookieStore = await cookies()
-  const canWrite = !!opts.allowCookieWrite // default false
+function computeCookieSecurity() {
+  const site = process.env.NEXT_PUBLIC_SITE_URL || '';
+  try {
+    const u = new URL(site);
+    const isHttps = u.protocol === 'https:';
+    const host = u.hostname;
+    const isLan =
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      host.endsWith('.local');
+    return { secure: isHttps && !isLan, sameSite: 'lax' as const };
+  } catch {
+    return { secure: false, sameSite: 'lax' as const };
+  }
+}
+
+export async function createSupabaseServer(opts: Options = {}) {
+  const cookieStore = await cookies();
+  const canWrite = opts.allowCookieWrite ?? true;
+  const { secure, sameSite } = computeCookieSecurity();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get: async (name: string) => cookieStore.get(name)?.value,
-        set: async (name: string, value: string, options?: any) => {
-          if (!canWrite) return
-          cookieStore.set({ name, value, ...options })
+        get(name: string) {
+          try {
+            return cookieStore.get(name)?.value;
+          } catch {
+            return undefined;
+          }
         },
-        remove: async (name: string, options?: any) => {
-          if (!canWrite) return
-          cookieStore.set({ name, value: '', ...options, maxAge: 0 })
+        set(name: string, value: string, options: CookieOptions) {
+          if (!canWrite) return;
+          try {
+            (cookieStore as any).set({ name, value, ...options, secure, sameSite });
+          } catch {}
+        },
+        remove(name: string, options: CookieOptions) {
+          if (!canWrite) return;
+          try {
+            (cookieStore as any).set({ name, value: '', maxAge: 0, ...options, secure, sameSite });
+          } catch {}
         },
       },
     }
-  )
+  );
 }

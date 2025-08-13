@@ -41,7 +41,7 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
       <div className="container h-14 flex items-center gap-3">
         {/* Left: brand / current project */}
         <div className="flex items-center gap-3 min-w-0">
-          <Link href="/dashboard" className="font-semibold shrink-0">
+          <Link href="/dashboard" prefetch={false} className="font-semibold shrink-0">
             RenoPlan
           </Link>
           <div className="text-sm text-muted-foreground truncate">
@@ -53,36 +53,43 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
         <nav className="ml-auto hidden md:flex items-center gap-2">
           <Link
             href="/dashboard"
+            prefetch={false}
             className={cn(
               'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
               pathname === '/dashboard' ? 'font-semibold bg-muted' : 'text-muted-foreground'
             )}
+            aria-current={pathname === '/dashboard' ? 'page' : undefined}
           >
             Dashboard
           </Link>
 
-          {tabs.map((t) => (
-            <Link
-              key={t.href}
-              href={t.href}
-              className={cn(
-                'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
-                isActive(t.href) ? 'font-semibold bg-muted' : 'text-muted-foreground'
-              )}
-            >
-              {t.label}
-            </Link>
-          ))}
+          {tabs.map((t) => {
+            const active = isActive(t.href);
+            return (
+              <Link
+                key={t.href}
+                href={t.href}
+                prefetch={false}
+                className={cn(
+                  'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
+                  active ? 'font-semibold bg-muted' : 'text-muted-foreground'
+                )}
+                aria-current={active ? 'page' : undefined}
+              >
+                {t.label}
+              </Link>
+            );
+          })}
 
           <div className="flex items-center gap-2 ml-2">
             <ThemeToggle />
             <Button asChild variant="outline" size="sm">
-              <Link href="/logout?next=/marketing">Sign out</Link>
-            </Button>
+  <Link href="/auth/logout?next=/marketing" prefetch={false}>Sign out</Link>
+</Button>
           </div>
         </nav>
 
-        {/* Mobile: sheet menu only (toggle inside the sheet) */}
+        {/* Mobile: sheet menu */}
         <div className="ml-auto md:hidden">
           <Sheet>
             <SheetTrigger asChild>
@@ -104,19 +111,27 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
                 <div className="mt-4">
                   <div className="text-xs text-muted-foreground mb-2">Projects</div>
                   <div className="grid gap-1">
-                    {projects.map((p) => (
-                      <SheetClose asChild key={p.id}>
-                        <Link
-                          href={`/projects/${p.id}`}
-                          className={cn(
-                            'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
-                            p.id === projectId ? 'font-semibold bg-muted' : 'text-muted-foreground'
-                          )}
-                        >
-                          {p.name ?? p.id.slice(0, 6)}
-                        </Link>
-                      </SheetClose>
-                    ))}
+                    {projects.map((p) => {
+                      const href = `/projects/${p.id}`;
+                      const active = isActive(href);
+                      return (
+                        <SheetClose asChild key={p.id}>
+                          <Link
+                            href={href}
+                            prefetch={false}
+                            className={cn(
+                              'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
+                              p.id === projectId || active
+                                ? 'font-semibold bg-muted'
+                                : 'text-muted-foreground'
+                            )}
+                            aria-current={p.id === projectId || active ? 'page' : undefined}
+                          >
+                            {p.name ?? p.id.slice(0, 6)}
+                          </Link>
+                        </SheetClose>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -128,28 +143,35 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
                   <SheetClose asChild>
                     <Link
                       href="/dashboard"
+                      prefetch={false}
                       className={cn(
                         'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
                         pathname === '/dashboard' ? 'font-semibold bg-muted' : 'text-muted-foreground'
                       )}
+                      aria-current={pathname === '/dashboard' ? 'page' : undefined}
                     >
                       Dashboard
                     </Link>
                   </SheetClose>
 
-                  {tabs.map((t) => (
-                    <SheetClose asChild key={t.href}>
-                      <Link
-                        href={t.href}
-                        className={cn(
-                          'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
-                          isActive(t.href) ? 'font-semibold bg-muted' : 'text-muted-foreground'
-                        )}
-                      >
-                        {t.label}
-                      </Link>
-                    </SheetClose>
-                  ))}
+                  {tabs.map((t) => {
+                    const active = isActive(t.href);
+                    return (
+                      <SheetClose asChild key={t.href}>
+                        <Link
+                          href={t.href}
+                          prefetch={false}
+                          className={cn(
+                            'rounded-md px-3 py-2 text-sm hover:bg-muted transition',
+                            active ? 'font-semibold bg-muted' : 'text-muted-foreground'
+                          )}
+                          aria-current={active ? 'page' : undefined}
+                        >
+                          {t.label}
+                        </Link>
+                      </SheetClose>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -159,11 +181,12 @@ export default function ProjectHeader({ projectId, projects = [] }: ProjectHeade
                 <div className="grid">
                   <SheetClose asChild>
                     <Link
-                      href="/logout?next=/marketing"
-                      className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition"
-                    >
-                      Sign out
-                    </Link>
+  href="/auth/logout?next=/marketing"
+  prefetch={false}
+  className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted transition"
+>
+  Sign out
+</Link>
                   </SheetClose>
                 </div>
               </div>

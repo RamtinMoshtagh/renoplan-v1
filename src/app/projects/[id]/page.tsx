@@ -1,5 +1,6 @@
+// app/projects/[id]/page.tsx
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServer } from '@/lib/supabase/server';
 import {
@@ -12,22 +13,38 @@ import { nok } from '@/lib/numbers';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ResponsiveGrid } from '@/components/layout/ResponsiveGrid';
 import { EmptyState } from '@/components/ui/empty-state';
+import type { CSSProperties } from 'react';
 
 type RoomRow = { id: string; name: string | null; sort: number };
-type TaskRow = { id: string; room_id: string | null; status: 'not_started'|'in_progress'|'done' };
+type TaskRow = { id: string; room_id: string | null; status: 'not_started' | 'in_progress' | 'done' };
+type BudgetItem = { amount_estimated: number | null; amount_actual: number | null };
 
-export default async function ProjectOverviewPage(
-  { params }: { params: Promise<{ id: string }> }
-) {
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export default async function ProjectOverviewPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = await params;
-  const supabase = await createSupabaseServer();
-  await supabase.auth.getUser();
+
+  // ✅ Persist refreshed tokens in prod
+  const supabase = await createSupabaseServer({ allowCookieWrite: true });
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    redirect(`/login?next=/projects/${id}`);
+  }
 
   const { data: project } = await supabase
     .from('projects')
     .select('*')
     .eq('id', id)
+    .eq('owner_id', user!.id)
     .single();
+
   if (!project) notFound();
 
   const [{ data: rooms }, { data: budget }, { data: projectTasks }] = await Promise.all([
@@ -40,21 +57,20 @@ export default async function ProjectOverviewPage(
       .from('budget_items')
       .select('amount_estimated, amount_actual')
       .eq('project_id', project.id),
-    // Pull minimal fields; we'll compute per-room progress below
     supabase
       .from('tasks')
       .select('id,room_id,status')
       .eq('project_id', project.id),
   ]);
 
-  // ---- Budget numbers ----
-  const est = (budget ?? []).reduce((s: number, b: any) => s + Number(b.amount_estimated ?? 0), 0);
-  const act = (budget ?? []).reduce((s: number, b: any) => s + Number(b.amount_actual ?? 0), 0);
+  // Budget
+  const est = (budget ?? []).reduce((s: number, b: BudgetItem) => s + Number(b.amount_estimated ?? 0), 0);
+  const act = (budget ?? []).reduce((s: number, b: BudgetItem) => s + Number(b.amount_actual ?? 0), 0);
   const total = Number(project.total_budget ?? 0);
   const pctEst = total > 0 ? Math.min(100, Math.round((est / total) * 100)) : 0;
   const pctAct = total > 0 ? Math.min(100, Math.round((act / total) * 100)) : 0;
 
-  // ---- Per-room task progress ----
+  // Per-room task progress
   const progressByRoom = new Map<string, { total: number; done: number; in_progress: number; not_started: number }>();
   for (const t of (projectTasks ?? []) as TaskRow[]) {
     const roomId = t.room_id;
@@ -69,10 +85,10 @@ export default async function ProjectOverviewPage(
     else agg.not_started += 1;
   }
 
-  // ===== Server actions (Overview only needs Add) =====
+  // Server action
   async function addRoom(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
@@ -90,7 +106,8 @@ export default async function ProjectOverviewPage(
     revalidatePath(`/projects/${project_id}`);
   }
 
-  // ===== UI =====
+  const autoGridStyle: CSSProperties = { ['--min-card' as any]: '260px' };
+
   return (
     <div className="space-y-4 md:space-y-6">
       <PageHeader
@@ -98,8 +115,8 @@ export default async function ProjectOverviewPage(
         description="Snapshot of your renovation project. Add rooms, track budget, and jump into details."
         actions={
           <>
-            <Link href={`/projects/${id}/report`}><Button variant="secondary">Report</Button></Link>
-            <Link href={`/projects/${id}/settings`}><Button>Settings</Button></Link>
+            <Link href={`/projects/${id}/report`} prefetch={false}><Button variant="secondary">Report</Button></Link>
+            <Link href={`/projects/${id}/settings`} prefetch={false}><Button>Settings</Button></Link>
           </>
         }
       />
@@ -131,34 +148,19 @@ export default async function ProjectOverviewPage(
               </div>
             </div>
 
-            {/* Progress bars */}
             <div className="space-y-2">
               <div className="text-xs text-muted-foreground">Estimated {pctEst}%</div>
-              <div
-                className="h-2 w-full overflow-hidden rounded bg-muted"
-                aria-label="Estimated progress"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={pctEst}
-                role="progressbar"
-              >
+              <div className="h-2 w-full overflow-hidden rounded bg-muted" role="progressbar" aria-label="Estimated progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pctEst}>
                 <div className="h-full bg-primary" style={{ width: `${pctEst}%` }} />
               </div>
               <div className="text-xs text-muted-foreground">Actual {pctAct}%</div>
-              <div
-                className="h-2 w-full overflow-hidden rounded bg-muted"
-                aria-label="Actual progress"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={pctAct}
-                role="progressbar"
-              >
+              <div className="h-2 w-full overflow-hidden rounded bg-muted" role="progressbar" aria-label="Actual progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pctAct}>
                 <div className="h-full bg-primary" style={{ width: `${pctAct}%` }} />
               </div>
             </div>
           </CardContent>
           <CardFooter className="flex justify-end">
-            <Link href={`/projects/${id}/budget`}>
+            <Link href={`/projects/${id}/budget`} prefetch={false}>
               <Button size="sm" variant="secondary">Open budget</Button>
             </Link>
           </CardFooter>
@@ -172,8 +174,7 @@ export default async function ProjectOverviewPage(
           </CardHeader>
 
           <CardContent className="space-y-3 pt-3">
-            {/* Add room */}
-            <form action={addRoom} className="flex flex-col sm:flex-row gap-2">
+            <form action={addRoom} className="flex flex-col gap-2 sm:flex-row">
               <input type="hidden" name="project_id" value={project.id} />
               <Input name="name" placeholder="New room name" className="flex-1" required />
               <Button type="submit">Add</Button>
@@ -187,38 +188,30 @@ export default async function ProjectOverviewPage(
                 className="mt-2"
               />
             ) : (
-              <ul className="auto-grid" style={{ ['--min-card' as any]: '260px' }}>
+              <ul className="auto-grid" style={autoGridStyle}>
                 {((rooms ?? []) as RoomRow[]).map((r) => {
                   const agg = progressByRoom.get(r.id) ?? { total: 0, done: 0, in_progress: 0, not_started: 0 };
                   const pct = agg.total > 0 ? Math.round((agg.done / agg.total) * 100) : 0;
 
                   return (
-                    <li key={r.id} className="rounded-md border p-3 card-elevated break-inside-avoid">
-                      {/* Whole card is clickable via inner Link */}
+                    <li key={r.id} className="card-elevated break-inside-avoid rounded-md border p-3">
                       <Link
                         href={`/projects/${id}/rooms/${r.id}`}
-                        className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+                        prefetch={false}
+                        className="block rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="font-medium flex-1 truncate">
+                          <span className="flex-1 truncate font-medium">
                             {r.name ?? 'Untitled room'}
                           </span>
                         </div>
 
-                        {/* Progress bar */}
                         <div className="mt-3 space-y-1.5">
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
                             <span>{agg.done}/{agg.total} done</span>
                             <span>{pct}%</span>
                           </div>
-                          <div
-                            className="h-2 w-full overflow-hidden rounded bg-muted"
-                            aria-label="Room completion"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={pct}
-                            role="progressbar"
-                          >
+                          <div className="h-2 w-full overflow-hidden rounded bg-muted" role="progressbar" aria-label="Room completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
                             <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
                           </div>
                           <div className="text-[11px] text-muted-foreground">
@@ -234,7 +227,7 @@ export default async function ProjectOverviewPage(
           </CardContent>
 
           <CardFooter className="flex justify-end">
-            <Link href={`/projects/${id}/rooms`}>
+            <Link href={`/projects/${id}/rooms`} prefetch={false}>
               <Button size="sm" variant="secondary">Manage all rooms</Button>
             </Link>
           </CardFooter>

@@ -23,6 +23,7 @@
   --border: 28 28% 82%;
   --input: 28 28% 82%;
   --ring: 28 28% 60%;
+  color-scheme: light;
 
   /* layout tokens */
   --radius: 10px;
@@ -46,6 +47,7 @@
   --border: 30 8% 22%;
   --input: 30 8% 22%;
   --ring: 28 28% 60%;
+  color-scheme: dark;
 }
 
 html, body { height: 100%; }

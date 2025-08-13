@@ -7,9 +7,8 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { nok } from '@/lib/numbers';
-import { ProjectProgress } from '@/components/ProjectProgress'; // <- named import
+import { ProjectProgress } from '@/components/ProjectProgress';
 import { ResponsiveGrid } from '@/components/layout/ResponsiveGrid';
 
 type ProjectRow = {
@@ -45,19 +44,19 @@ export default function ProjectsGrid({ projects }: { projects: ProjectRow[] }) {
         return [...base].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
       case 'budget':
         return [...base].sort(
-          (a, b) => (Number(b.total_budget ?? 0) - Number(a.total_budget ?? 0))
+          (a, b) => Number(b.total_budget ?? 0) - Number(a.total_budget ?? 0)
         );
       default:
         return [...base].sort(
           (a, b) =>
-            new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+            new Date(b.created_at ?? 0).getTime() -
+            new Date(a.created_at ?? 0).getTime()
         );
     }
   }, [projects, q, sort]);
 
   return (
     <div className="space-y-3">
-      {/* Toolbar */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Input
@@ -65,8 +64,10 @@ export default function ProjectsGrid({ projects }: { projects: ProjectRow[] }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="w-full sm:w-72"
+            aria-label="Search projects"
           />
         </div>
+        {/* optional: add a simple sort select if you want */}
       </div>
 
       {filtered.length === 0 ? (
@@ -95,11 +96,13 @@ export default function ProjectsGrid({ projects }: { projects: ProjectRow[] }) {
                 <ProjectProgress percent={Number(p.progress ?? 0)} />
               </CardContent>
               <CardFooter className="flex gap-2 justify-end">
-                <Link href={`/projects/${p.id}`}>
-                  <Button size="sm">Open</Button>
+                <Link href={`/projects/${p.id}`} prefetch={false}>
+                  <Button size="sm" aria-label={`Open project ${p.name ?? p.id.slice(0, 6)}`}>
+                    Open
+                  </Button>
                 </Link>
-                <Link href={`/projects/${p.id}/report`}>
-                  <Button size="sm" variant="outline">
+                <Link href={`/projects/${p.id}/report`} prefetch={false}>
+                  <Button size="sm" variant="outline" aria-label={`Open report for ${p.name ?? p.id.slice(0, 6)}`}>
                     Report
                   </Button>
                 </Link>

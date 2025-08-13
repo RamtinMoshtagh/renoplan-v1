@@ -1,8 +1,14 @@
+// app/page.tsx
 import { redirect } from 'next/navigation'
 import { createSupabaseServer } from '@/lib/supabase/server'
 
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export default async function Home() {
-  const supabase = await createSupabaseServer()
+  // ✅ allow cookie writes so refreshed tokens persist in prod
+  const supabase = await createSupabaseServer({ allowCookieWrite: true })
   const { data: { user } } = await supabase.auth.getUser()
 
   if (user) {
@@ -20,6 +26,6 @@ export default async function Home() {
     redirect('/dashboard')
   }
 
-  // Not signed in → send to marketing landing
+  // Not signed in → marketing landing
   redirect('/marketing')
 }

@@ -14,12 +14,25 @@ import { RoomListDnD } from './RoomListDnD';
 type RoomRow = { id: string; name: string; sort: number };
 type TaskRow = { id: string; room_id: string | null; status: 'not_started'|'in_progress'|'done' };
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function RoomsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createSupabaseServer();
+
+  // ✅ persist refreshed tokens in prod
+  const supabase = await createSupabaseServer({ allowCookieWrite: true });
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect(`/login?next=/projects/${id}/rooms`);
 
   const { data: project } = await supabase
-    .from('projects').select('id,name').eq('id', id).single();
+    .from('projects')
+    .select('id,name')
+    .eq('id', id)
+    .eq('owner_id', user.id)
+    .single();
   if (!project) notFound();
 
   const [{ data: rooms }, { data: tasks }] = await Promise.all([
@@ -27,7 +40,6 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     supabase.from('tasks').select('id,room_id,status').eq('project_id', project.id),
   ]);
 
-  // ---- Per-room task progress (serializable) ----
   const progress: Record<string, { total: number; done: number; in_progress: number; not_started: number }> = {};
   for (const t of (tasks ?? []) as TaskRow[]) {
     const roomId = t.room_id;
@@ -39,10 +51,9 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     else progress[roomId].not_started += 1;
   }
 
-  // ===== Server actions =====
   async function addRoom(formData: FormData) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     const project_id = String(formData.get('project_id'));
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
@@ -53,15 +64,13 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
 
     const sort = (maxSort?.sort ?? -1) + 1;
     await supa.from('rooms').insert({ project_id, name, sort });
-
-    // Refresh cache + trigger a client transition so the new card appears
     revalidatePath(`/projects/${project_id}/rooms`);
     redirect(`/projects/${project_id}/rooms`);
   }
 
   async function reorderRooms(project_id: string, orderedIds: string[]) {
     'use server';
-    const supa = await createSupabaseServer();
+    const supa = await createSupabaseServer({ allowCookieWrite: true });
     if (!orderedIds?.length) return;
 
     const { data: projectRooms } = await supa.from('rooms').select('id').eq('project_id', project_id);
@@ -75,16 +84,18 @@ export default async function RoomsPage({ params }: { params: Promise<{ id: stri
     revalidatePath(`/projects/${project_id}/rooms`);
   }
 
-  // Force RoomListDnD to remount when the list changes (helps if it keeps local state)
   const roomsKey = (rooms ?? []).map(r => r.id).join('|');
 
-  // ===== UI =====
   return (
     <div className="space-y-4 md:space-y-6">
       <PageHeader
         title="Rooms"
         description="Drag to reorder. Click a room to view details. Progress bars show completion."
-        actions={<Link href={`/projects/${id}`}><Button variant="secondary">Back to Overview</Button></Link>}
+        actions={
+          <Link href={`/projects/${id}`} prefetch={false}>
+            <Button variant="secondary">Back to Overview</Button>
+          </Link>
+        }
       />
 
       <Card>
